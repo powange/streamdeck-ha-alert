@@ -5,6 +5,8 @@ import type { Alert, ClearRequest } from "./schema";
 export interface DisplayedAlert {
 	readonly alert: Alert;
 	readonly startedAt: number;
+	/** Réception de l'alerte : change quand HA renvoie une alerte de même id (nouvelle sonnerie…). */
+	readonly receivedAt: number;
 }
 
 export interface AlertManagerOptions {
@@ -41,12 +43,18 @@ export class AlertManager {
 
 	/** Alerte actuellement affichée. */
 	current(): DisplayedAlert | undefined {
-		return this.#displayed ? { alert: this.#displayed.queued.alert, startedAt: this.#displayed.startedAt } : undefined;
+		const displayed = this.#displayed;
+		return displayed ? { alert: displayed.queued.alert, startedAt: displayed.startedAt, receivedAt: displayed.queued.receivedAt } : undefined;
 	}
 
 	/** Position de l'alerte affichée dans la file (badge « 1/3 »). */
 	position(): { index: number; total: number } | null {
 		return this.#queue.position();
+	}
+
+	/** Identifiants des alertes actives, de la plus prioritaire à la moins prioritaire. */
+	activeIds(): string[] {
+		return this.#queue.list().map((q) => q.alert.id);
 	}
 
 	/** Vrai s'il reste au moins une alerte `fullscreen` dans la file. */
@@ -130,8 +138,10 @@ export class AlertManager {
 		if (!current) {
 			this.#displayed = null;
 		} else if (this.#displayed?.queued !== current) {
-			// Nouvelle alerte affichée (ou mise à jour de la même) : l'animation repart de zéro.
+			// Nouvelle alerte affichée (ou mise à jour de la même) : l'animation repart de zéro,
+			// et sa durée d'affichage commence si c'est son premier affichage.
 			this.#displayed = { queued: current, startedAt: this.#now() };
+			this.#queue.markDisplayed(current.alert.id, this.#now());
 		}
 
 		this.dispose();

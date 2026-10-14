@@ -13,47 +13,65 @@ export interface ProfileControllerOptions {
 	devices(): Iterable<DeviceInfo>;
 	/** `profile` absent : retour au profil précédent (comportement documenté du SDK). */
 	switchToProfile(deviceId: string, profile?: string): Promise<void>;
-	/** Nombre d'Alert keys actuellement visibles sur l'appareil. */
-	visibleKeys(deviceId: string): number;
+	/**
+	 * Vrai si le profil Alerte est affiché sur l'appareil, c'est-à-dire si toute la grille est
+	 * couverte d'Alert keys visibles (le profil n'en contient pas d'autres).
+	 */
+	isAlertProfileVisible(deviceId: string): boolean;
+	/** Appelé quand un appareil entre dans le profil Alerte ou en sort (pour redessiner). */
+	onChange?(): void;
 	log?(message: string): void;
+	/** Délai pour voir apparaître le profil Alerte après la demande de bascule (ms). */
+	confirmTimeoutMs?: number;
 	/** Délai avant de conclure que l'utilisateur a quitté le profil Alerte (ms). */
 	leaveDelayMs?: number;
 }
 
 /** Ce que veut l'alerte affichée. */
 export interface FullscreenRequest {
-	/** Identifiant de l'alerte affichée. */
-	readonly alertId: string;
+	/**
+	 * Identifie l'alerte et son envoi : une alerte renvoyée par HA avec le même id (nouvelle
+	 * sonnerie) a un autre jeton, et rebascule un appareil dont on avait quitté le profil.
+	 */
+	readonly token: string;
 	/** L'alerte affichée est en mode `fullscreen`. */
 	readonly fullscreen: boolean;
 	/** Il reste au moins une alerte `fullscreen` dans la file. */
 	readonly anyFullscreen: boolean;
 }
 
+/** Suivi d'un appareil basculé (ou en cours de bascule) sur le profil Alerte. */
+interface DeviceState {
+	/** `pending` : bascule demandée, profil pas encore vu ; `shown` : profil affiché. */
+	phase: "pending" | "shown";
+	/** Retour demandé avant la confirmation de la bascule : à faire dès qu'elle est confirmée. */
+	returnWhenShown: boolean;
+	timer: ReturnType<typeof setTimeout> | null;
+}
+
 /**
  * Bascule chaque appareil vers son profil « Alerte » et l'en fait revenir.
  *
- * Le SDK ne permet pas de connaître le profil affiché : on suit donc l'état de chaque appareil.
- * `switchToProfile(device)` sans nom ramène au profil précédent, sur la page qui était affichée ;
- * il n'y a qu'un niveau de « précédent », d'où le soin à ne jamais rebasculer un appareil déjà
- * sur le profil Alerte.
+ * Le SDK ne dit pas quel profil est affiché, et `switchToProfile(device)` sans nom ramène
+ * au profil *précédent* : un retour demandé alors que la bascule n'a pas eu lieu enverrait
+ * l'utilisateur sur un autre profil. Le contrôleur ne revient donc en arrière que depuis un
+ * profil Alerte effectivement vu (grille couverte d'Alert keys), et ne rebascule jamais un
+ * appareil qui y est déjà.
  */
 export class ProfileController {
 	readonly #options: ProfileControllerOptions;
-	/** Appareils actuellement basculés sur le profil Alerte. */
-	readonly #inAlert = new Set<string>();
-	/** Appareils dont l'utilisateur a quitté le profil Alerte, avec l'alerte alors affichée. */
+	readonly #states = new Map<string, DeviceState>();
+	/** Appareils dont l'utilisateur a quitté le profil Alerte, avec le jeton de l'alerte d'alors. */
 	readonly #dismissed = new Map<string, string>();
-	readonly #leaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
 	#request: FullscreenRequest | null = null;
 
 	constructor(options: ProfileControllerOptions) {
 		this.#options = options;
 	}
 
-	/** Vrai si l'appareil affiche (en principe) le profil Alerte. */
+	/** Vrai si l'appareil affiche le profil Alerte (bascule confirmée). */
 	isInAlertProfile(deviceId: string): boolean {
-		return this.#inAlert.has(deviceId);
+		return this.#states.get(deviceId)?.phase === "shown";
 	}
 
 	/** Vrai si un profil Alerte est déclaré pour ce type d'appareil. */
@@ -68,37 +86,59 @@ export class ProfileController {
 	 */
 	sync(request: FullscreenRequest | null): void {
 		this.#request = request;
+		if (!request?.anyFullscreen) this.#dismissed.clear();
 		for (const device of this.#options.devices()) {
 			this.#syncDevice(device);
 		}
-		if (!request?.anyFullscreen) this.#dismissed.clear();
+	}
+
+	/** Réaffiche le profil Alerte sur les appareils qui l'avaient quitté (touche Statut). */
+	reshow(): void {
+		this.#dismissed.clear();
+		this.sync(this.#request);
 	}
 
 	/** À appeler quand des Alert keys apparaissent ou disparaissent sur un appareil. */
 	keysChanged(deviceId: string): void {
-		if (!this.#inAlert.has(deviceId) || this.#leaveTimers.has(deviceId)) return;
-		if (this.#options.visibleKeys(deviceId) > 0) return;
-		// Pendant une bascule, les touches de l'ancienne page disparaissent avant que celles du
-		// profil Alerte n'apparaissent : on attend un peu avant de conclure à une sortie manuelle.
-		this.#leaveTimers.set(
-			deviceId,
-			setTimeout(() => {
-				this.#leaveTimers.delete(deviceId);
-				if (!this.#inAlert.has(deviceId) || this.#options.visibleKeys(deviceId) > 0) return;
-				this.#inAlert.delete(deviceId);
-				if (this.#request) this.#dismissed.set(deviceId, this.#request.alertId);
-				this.#log(`${deviceId} : profil Alerte quitté manuellement, pas de retour automatique`);
-			}, this.#options.leaveDelayMs ?? 1000),
-		);
+		const state = this.#states.get(deviceId);
+		if (!state) return;
+		const visible = this.#options.isAlertProfileVisible(deviceId);
+
+		if (state.phase === "pending") {
+			if (!visible) return;
+			this.#clearTimer(state);
+			state.phase = "shown";
+			this.#log(`${deviceId} : profil Alerte affiché`);
+			if (state.returnWhenShown) {
+				this.#return(deviceId);
+			} else {
+				this.#options.onChange?.();
+			}
+			return;
+		}
+
+		if (visible) {
+			// Disparition passagère (changement de page dans le logiciel…) : rien à faire.
+			this.#clearTimer(state);
+			return;
+		}
+		if (state.timer) return;
+		state.timer = setTimeout(() => {
+			state.timer = null;
+			if (this.#states.get(deviceId) !== state || this.#options.isAlertProfileVisible(deviceId)) return;
+			this.#states.delete(deviceId);
+			if (this.#request) this.#dismissed.set(deviceId, this.#request.token);
+			this.#log(`${deviceId} : profil Alerte quitté manuellement, pas de retour automatique`);
+			this.#options.onChange?.();
+		}, this.#options.leaveDelayMs ?? 500);
 	}
 
 	/** Appareil déconnecté : on oublie son état (il sera rebasculé à la reconnexion si besoin). */
 	deviceDisconnected(deviceId: string): void {
-		this.#inAlert.delete(deviceId);
+		const state = this.#states.get(deviceId);
+		if (state) this.#clearTimer(state);
+		this.#states.delete(deviceId);
 		this.#dismissed.delete(deviceId);
-		const timer = this.#leaveTimers.get(deviceId);
-		if (timer) clearTimeout(timer);
-		this.#leaveTimers.delete(deviceId);
 	}
 
 	/** Appareil (re)connecté : applique l'état voulu. */
@@ -106,9 +146,15 @@ export class ProfileController {
 		this.#syncDevice(device);
 	}
 
-	/** Ramène l'appareil au profil précédent (appui sur une touche du profil Alerte hors alerte). */
+	/**
+	 * Ramène l'appareil au profil précédent, sans alerte en cours, si le profil Alerte est affiché
+	 * (appui sur une de ses touches après un redémarrage, par exemple).
+	 */
 	leave(deviceId: string): void {
-		this.#inAlert.delete(deviceId);
+		if (!this.#options.isAlertProfileVisible(deviceId)) return;
+		const state = this.#states.get(deviceId);
+		if (state) this.#clearTimer(state);
+		this.#states.delete(deviceId);
 		this.#switch(deviceId, undefined);
 	}
 
@@ -116,24 +162,65 @@ export class ProfileController {
 		const profile = this.#options.profiles.get(device.type);
 		if (!profile || !device.isConnected) return;
 		const request = this.#request;
-		const inAlert = this.#inAlert.has(device.id);
+		const state = this.#states.get(device.id);
 
-		if (!inAlert && request?.fullscreen && this.#dismissed.get(device.id) !== request.alertId) {
-			this.#inAlert.add(device.id);
+		if (!state && request?.fullscreen && this.#dismissed.get(device.id) !== request.token) {
 			this.#dismissed.delete(device.id);
-			this.#log(`${device.name} : bascule vers ${profile}`);
-			this.#switch(device.id, profile);
-		} else if (inAlert && !request?.anyFullscreen) {
-			this.#inAlert.delete(device.id);
-			this.#log(`${device.name} : retour au profil précédent`);
-			this.#switch(device.id, undefined);
+			if (this.#options.isAlertProfileVisible(device.id)) {
+				// Déjà sur le profil Alerte (plugin redémarré pendant une alerte…) : rebasculer
+				// ferait du profil Alerte le « précédent ».
+				this.#states.set(device.id, { phase: "shown", returnWhenShown: false, timer: null });
+				this.#options.onChange?.();
+				return;
+			}
+			this.#enter(device, profile);
+		} else if (state && !request?.anyFullscreen) {
+			if (state.phase === "shown") {
+				this.#return(device.id);
+			} else {
+				// Bascule pas encore confirmée : on ne revient qu'une fois le profil Alerte vu.
+				state.returnWhenShown = true;
+			}
+		} else if (state?.phase === "pending" && request?.anyFullscreen) {
+			state.returnWhenShown = false;
 		}
+	}
+
+	#enter(device: DeviceInfo, profile: string): void {
+		const state: DeviceState = { phase: "pending", returnWhenShown: false, timer: null };
+		state.timer = setTimeout(() => {
+			state.timer = null;
+			if (this.#states.get(device.id) !== state || state.phase !== "pending") return;
+			// Profil jamais affiché (non installé, installation refusée, supprimé…) : surtout ne
+			// pas « revenir », ce qui enverrait l'utilisateur sur un autre profil.
+			this.#states.delete(device.id);
+			if (this.#request) this.#dismissed.set(device.id, this.#request.token);
+			this.#log(`${device.name} : le profil Alerte ne s'est pas affiché (non installé ?), alerte limitée aux Alert keys visibles`);
+			this.#options.onChange?.();
+		}, this.#options.confirmTimeoutMs ?? 5000);
+		this.#states.set(device.id, state);
+		this.#log(`${device.name} : bascule vers ${profile}`);
+		this.#switch(device.id, profile);
+	}
+
+	#return(deviceId: string): void {
+		const state = this.#states.get(deviceId);
+		if (state) this.#clearTimer(state);
+		this.#states.delete(deviceId);
+		this.#log(`${deviceId} : retour au profil précédent`);
+		this.#switch(deviceId, undefined);
+		this.#options.onChange?.();
 	}
 
 	#switch(deviceId: string, profile: string | undefined): void {
 		this.#options.switchToProfile(deviceId, profile).catch((error: unknown) => {
 			this.#log(`${deviceId} : changement de profil impossible (${error instanceof Error ? error.message : String(error)})`);
 		});
+	}
+
+	#clearTimer(state: DeviceState): void {
+		if (state.timer) clearTimeout(state.timer);
+		state.timer = null;
 	}
 
 	#log(message: string): void {

@@ -6,11 +6,13 @@ export const MAX_IMAGES_PER_SECOND = 200;
 export const MIN_TICK_MS = 100;
 
 /**
- * Intervalle du tick selon le nombre de touches : 100 ms (10 fps) tant que le débit
- * reste sous MAX_IMAGES_PER_SECOND, plus lent au-delà (Stream Deck XL, plusieurs appareils).
+ * Intervalle avant le tick suivant selon le nombre d'images réellement envoyées : 100 ms
+ * (10 fps) tant que le débit reste sous MAX_IMAGES_PER_SECOND, plus long juste après un tick
+ * chargé. Un clignotement ne change toutes les touches qu'une fois par intervalle : le tick
+ * reste rapide entre deux changements, ce qui garde un rythme régulier, même sur un XL.
  */
-export function tickInterval(keyCount: number): number {
-	return Math.max(MIN_TICK_MS, Math.ceil((keyCount * 1000) / MAX_IMAGES_PER_SECOND));
+export function tickInterval(imagesSent: number): number {
+	return Math.max(MIN_TICK_MS, Math.ceil((imagesSent * 1000) / MAX_IMAGES_PER_SECOND));
 }
 
 export interface AnimatorOptions {
@@ -72,37 +74,38 @@ export class Animator {
 	}
 
 	#tick(): void {
-		const count = this.#draw();
+		const sent = this.#draw();
 		if (this.#animating) {
-			this.#timer = setTimeout(() => this.#tick(), tickInterval(count));
+			this.#timer = setTimeout(() => this.#tick(), tickInterval(sent));
 		}
 	}
 
-	/** Dessine toutes les touches ; renvoie leur nombre. */
+	/** Dessine toutes les touches ; renvoie le nombre d'images envoyées. */
 	#draw(): number {
 		const now = this.#now();
-		let count = 0;
+		let sent = 0;
 		for (const key of this.#options.keys()) {
-			this.#drawKey(key, now);
-			count++;
+			if (this.#drawKey(key, now)) sent++;
 		}
-		return count;
+		return sent;
 	}
 
-	#drawKey(key: AlertKeyHandle, now: number): void {
+	/** Dessine une touche ; renvoie `true` si une nouvelle image a été envoyée. */
+	#drawKey(key: AlertKeyHandle, now: number): boolean {
 		let image: string;
 		try {
 			image = this.#options.render(key, now);
 		} catch (error) {
 			this.#options.onError?.(error);
-			return;
+			return false;
 		}
-		if (this.#sent.get(key.id) === image) return;
+		if (this.#sent.get(key.id) === image) return false;
 		this.#sent.set(key.id, image);
 		key.setImage(image).catch((error: unknown) => {
 			// En cas d'échec, l'image sera renvoyée au prochain tick.
 			this.#sent.delete(key.id);
 			this.#options.onError?.(error);
 		});
+		return true;
 	}
 }

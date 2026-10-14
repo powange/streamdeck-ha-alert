@@ -185,6 +185,48 @@ describe("HaClient", () => {
 		await expect(client.fireEvent("x", {})).rejects.toThrow("pas connecté");
 	});
 
+	it("ne signale pas « pas admin » si la connexion tombe pendant l'abonnement", async () => {
+		const { client, socket, states } = setup();
+		client.start();
+		socket().receive({ type: "auth_required" });
+		socket().receive({ type: "auth_ok" });
+		await flush();
+		socket().drop();
+		await flush();
+		expect(states).not.toContain("forbidden");
+		expect(states.at(-1)).toBe("disconnected");
+		client.stop();
+	});
+
+	it("abandonne une connexion sans réponse d'authentification et réessaie plus tard", async () => {
+		vi.spyOn(Math, "random").mockReturnValue(0.5);
+		const { client, sockets, socket, states } = setup();
+		client.start();
+		// Serveur qui accepte le WebSocket mais n'envoie jamais auth_required.
+		await vi.advanceTimersByTimeAsync(10_000);
+		expect(socket().closed).toBe(true);
+		expect(states.at(-1)).toBe("disconnected");
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(sockets).toHaveLength(2);
+		client.stop();
+	});
+
+	it("respecte le délai de reconnexion quand la connexion tombe pendant un ping", async () => {
+		vi.spyOn(Math, "random").mockReturnValue(0.5);
+		const { client, sockets, socket } = setup({ pingIntervalMs: 30_000 });
+		client.start();
+		await authenticate(socket());
+		await vi.advanceTimersByTimeAsync(30_000);
+		expect(socket().last()?.type).toBe("ping");
+		socket().drop();
+		await flush();
+		// Pas de reconnexion immédiate : on attend le délai (1 s pour le premier essai).
+		expect(sockets).toHaveLength(1);
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(sockets).toHaveLength(2);
+		client.stop();
+	});
+
 	it("arrête toute reconnexion après stop()", async () => {
 		const { client, sockets, socket } = setup();
 		client.start();
@@ -241,6 +283,8 @@ describe("normalizeHaUrl", () => {
 		["https://maison.example.com/", "wss://maison.example.com/api/websocket"],
 		["192.168.1.10:8123", "ws://192.168.1.10:8123/api/websocket"],
 		["  wss://ha.example.com/api/websocket  ", "wss://ha.example.com/api/websocket"],
+		["http://ha.local:8123/lovelace/0?edit=1", "ws://ha.local:8123/api/websocket"],
+		["https://maison.example.com/ha/api/websocket", "wss://maison.example.com/ha/api/websocket"],
 	])("%s → %s", (input, expected) => {
 		expect(normalizeHaUrl(input)).toBe(expected);
 	});

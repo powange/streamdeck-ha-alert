@@ -88,6 +88,22 @@ describe("parseAlert", () => {
 		expect(result.value.keys).toBeUndefined();
 	});
 
+	it("tronque un texte trop long au lieu de refuser l'alerte", () => {
+		const result = parseAlert({ id: "a", text: "x".repeat(500) });
+		expect(result.ok).toBe(true);
+		if (!result.ok) return;
+		expect(result.value.text).toHaveLength(200);
+		expect(result.value.text.endsWith("…")).toBe(true);
+	});
+
+	it("traite « None » (rendu d'un template HA vide) comme un champ absent", () => {
+		const result = parseAlert({ id: "a", mode: "None", icon: "None", text: "None" });
+		expect(result.ok && result.value).toMatchObject({ mode: "fullscreen", icon: "none", text: "" });
+		// « none » en minuscules reste une valeur valide (icône).
+		const icon = parseAlert({ id: "a", icon: "none" });
+		expect(icon.ok && icon.value.icon).toBe("none");
+	});
+
 	it("refuse une alerte sans id", () => {
 		const result = parseAlert({ color: "#ff0000" });
 		expect(result.ok).toBe(false);

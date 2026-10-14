@@ -7,7 +7,7 @@ import { parseAlert, parseClear } from "./alerts/schema";
 import { KeyRegistry } from "./devices/key-registry";
 import { ProfileController, type DeviceInfo } from "./devices/profile-controller";
 import { loadProfiles } from "./devices/profiles";
-import { ALERT_EVENT, CLEAR_EVENT, fireHaEvent, onHaEvent, startConnection } from "./ha/connection";
+import { ALERT_EVENT, CLEAR_EVENT, fireHaEvent, onConnectionState, onHaEvent, READY_EVENT, startConnection } from "./ha/connection";
 import { Animator } from "./render/animator";
 import { keyImage } from "./render/key-image";
 
@@ -28,7 +28,8 @@ const profiles = new ProfileController({
 	profiles: loadProfiles(),
 	devices: () => [...streamDeck.devices].map(deviceInfo),
 	switchToProfile: (deviceId, profile) => streamDeck.profiles.switchToProfile(deviceId, profile),
-	visibleKeys: (deviceId) => registry.onDevice(deviceId).length,
+	isAlertProfileVisible: (deviceId) => registry.coversDevice(deviceId),
+	onChange: () => animator.refresh(),
 	log: (message) => logger.info(message),
 });
 
@@ -38,11 +39,16 @@ const manager: AlertManager = new AlertManager({
 		const current = manager.current();
 		profiles.sync(
 			current
-				? { alertId: current.alert.id, fullscreen: current.alert.mode === "fullscreen", anyFullscreen: manager.anyFullscreen() }
+				? {
+						token: `${current.alert.id}@${current.receivedAt}`,
+						fullscreen: current.alert.mode === "fullscreen",
+						anyFullscreen: manager.anyFullscreen(),
+					}
 				: null,
 		);
 		animator.setAnimating(current !== undefined);
 		animator.refresh();
+		statusKey.refresh();
 	},
 	log: (message) => logger.info(message),
 });
@@ -54,8 +60,9 @@ const animator = new Animator({
 	onError: (error) => logger.error("rendu impossible", error),
 });
 
+const statusKey = new StatusKey({ manager, profiles });
 streamDeck.actions.registerAction(new AlertKey({ registry, animator, manager, profiles }));
-streamDeck.actions.registerAction(new StatusKey());
+streamDeck.actions.registerAction(statusKey);
 
 streamDeck.devices.onDeviceDidConnect((ev) => profiles.deviceConnected(deviceInfo(ev.device)));
 streamDeck.devices.onDeviceDidDisconnect((ev) => profiles.deviceDisconnected(ev.device.id));
@@ -70,6 +77,12 @@ onHaEvent((eventType, data) => {
 		if (result.ok) manager.handleClear(result.value);
 		else logger.warn(`effacement invalide ignoré :\n${result.error}`);
 	}
+});
+
+// À chaque (re)connexion, HA reçoit la liste des alertes encore affichées : un effacement envoyé
+// pendant une coupure a pu être perdu, une automatisation peut alors faire le ménage.
+onConnectionState((state) => {
+	if (state === "connected") void fireHaEvent(READY_EVENT, { active: manager.activeIds() });
 });
 
 streamDeck.logger.info("démarrage du plugin");

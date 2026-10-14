@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ProfileController, type DeviceInfo, type FullscreenRequest } from "../src/devices/profile-controller";
 import { profilesFromManifest } from "../src/devices/profiles";
+import { KeyRegistry, type AlertKeyHandle } from "../src/devices/key-registry";
 import { hasBadge, keyRole } from "../src/render/layout";
+import { DEFAULT_IDLE } from "../src/render/key-image";
 
 const XL = { columns: 8, rows: 4 };
 const MINI = { columns: 3, rows: 2 };
@@ -54,13 +56,39 @@ describe("keyRole et hasBadge", () => {
 	});
 });
 
+describe("KeyRegistry.coversDevice", () => {
+	const key = (id: string, column: number, row: number, deviceId = "XL"): AlertKeyHandle => ({
+		id,
+		deviceId,
+		deviceName: "XL",
+		grid: { columns: 2, rows: 2 },
+		position: { column, row },
+		idle: DEFAULT_IDLE,
+		setImage: async () => undefined,
+	});
+
+	it("n'est vrai que si toutes les positions de la grille ont une Alert key", () => {
+		const registry = new KeyRegistry();
+		registry.add(key("a", 0, 0));
+		registry.add(key("b", 1, 0));
+		registry.add(key("c", 0, 1));
+		expect(registry.coversDevice("XL")).toBe(false);
+		registry.add(key("d", 1, 1));
+		expect(registry.coversDevice("XL")).toBe(true);
+		expect(registry.coversDevice("AUTRE")).toBe(false);
+	});
+});
+
 describe("ProfileController", () => {
 	beforeEach(() => vi.useFakeTimers());
 	afterEach(() => vi.useRealTimers());
 
-	function setup(devices: DeviceInfo[]) {
+	/** Simule le logiciel Stream Deck : la bascule affiche (ou non) le profil Alerte. */
+	function setup(devices: DeviceInfo[], options: { switchWorks?: boolean } = {}) {
 		const switches: [string, string | undefined][] = [];
-		const visible = new Map<string, number>();
+		/** Appareils dont le profil Alerte est affiché (grille couverte d'Alert keys). */
+		const shown = new Set<string>();
+		const onChange = vi.fn();
 		const controller = new ProfileController({
 			profiles: new Map([
 				[2, "profiles/HA Alert XL"],
@@ -70,15 +98,22 @@ describe("ProfileController", () => {
 			switchToProfile: async (id, profile) => {
 				switches.push([id, profile]);
 			},
-			visibleKeys: (id) => visible.get(id) ?? 0,
+			isAlertProfileVisible: (id) => shown.has(id),
+			onChange,
 		});
-		return { controller, switches, visible };
+		/** Le profil Alerte apparaît (ou disparaît) sur l'appareil. */
+		const show = (id: string, visible = true) => {
+			if (visible) shown.add(id);
+			else shown.delete(id);
+			controller.keysChanged(id);
+		};
+		return { controller, switches, show, onChange, switchWorks: options.switchWorks ?? true };
 	}
 
 	const xl: DeviceInfo = { id: "XL", name: "Stream Deck XL", type: 2, isConnected: true };
 	const mk2: DeviceInfo = { id: "MK2", name: "Stream Deck", type: 0, isConnected: true };
 	const pedal: DeviceInfo = { id: "PED", name: "Pedal", type: 5, isConnected: true };
-	const full = (alertId: string): FullscreenRequest => ({ alertId, fullscreen: true, anyFullscreen: true });
+	const full = (token: string): FullscreenRequest => ({ token, fullscreen: true, anyFullscreen: true });
 
 	it("bascule tous les appareils ayant un profil, et ceux-là seulement", () => {
 		const { controller, switches } = setup([xl, mk2, pedal]);
@@ -87,20 +122,31 @@ describe("ProfileController", () => {
 			["XL", "profiles/HA Alert XL"],
 			["MK2", "profiles/HA Alert"],
 		]);
-		expect(controller.isInAlertProfile("XL")).toBe(true);
-		expect(controller.isInAlertProfile("PED")).toBe(false);
 	});
 
-	it("ne rebascule jamais un appareil déjà sur le profil Alerte", () => {
-		const { controller, switches } = setup([xl]);
+	it("ne considère l'appareil sur le profil Alerte qu'une fois celui-ci affiché", () => {
+		const { controller, show, onChange } = setup([xl]);
+		controller.sync(full("a"));
+		expect(controller.isInAlertProfile("XL")).toBe(false);
+		show("XL");
+		expect(controller.isInAlertProfile("XL")).toBe(true);
+		expect(onChange).toHaveBeenCalled();
+	});
+
+	it("ne rebascule jamais un appareil déjà en cours de bascule ou sur le profil Alerte", () => {
+		const { controller, switches, show } = setup([xl]);
 		controller.sync(full("a"));
 		controller.sync(full("b"));
+		show("XL");
+		controller.sync(full("c"));
 		expect(switches).toHaveLength(1);
 	});
 
 	it("revient au profil précédent (sans nom) quand plus aucune alerte plein écran ne reste", () => {
-		const { controller, switches } = setup([xl, mk2]);
+		const { controller, switches, show } = setup([xl, mk2]);
 		controller.sync(full("a"));
+		show("XL");
+		show("MK2");
 		controller.sync(null);
 		expect(switches.slice(2)).toEqual([
 			["XL", undefined],
@@ -109,54 +155,108 @@ describe("ProfileController", () => {
 		expect(controller.isInAlertProfile("XL")).toBe(false);
 	});
 
-	it("reste sur le profil en parcourant une alerte keys tant qu'une alerte plein écran attend", () => {
+	it("ne revient jamais en arrière si la bascule n'a pas eu lieu (profil non installé)", async () => {
 		const { controller, switches } = setup([xl]);
 		controller.sync(full("a"));
-		controller.sync({ alertId: "k", fullscreen: false, anyFullscreen: true });
+		await vi.advanceTimersByTimeAsync(5000);
+		// Pas de nouvelle tentative pour la même alerte (évite de redemander l'installation en boucle)…
+		controller.sync(full("a"));
+		expect(switches).toHaveLength(1);
+		// … et surtout pas de retour arrière à la fin de l'alerte.
+		controller.sync(null);
+		expect(switches).toEqual([["XL", "profiles/HA Alert XL"]]);
+	});
+
+	it("revient dès la confirmation si l'alerte s'est terminée pendant une bascule lente", async () => {
+		const { controller, switches, show } = setup([xl]);
+		controller.sync(full("a"));
+		controller.sync(null);
+		expect(switches).toHaveLength(1);
+		await vi.advanceTimersByTimeAsync(3000);
+		show("XL");
+		expect(switches).toEqual([
+			["XL", "profiles/HA Alert XL"],
+			["XL", undefined],
+		]);
+	});
+
+	it("reste sur le profil en parcourant une alerte keys tant qu'une alerte plein écran attend", () => {
+		const { controller, switches, show } = setup([xl]);
+		controller.sync(full("a"));
+		show("XL");
+		controller.sync({ token: "k", fullscreen: false, anyFullscreen: true });
 		expect(switches).toHaveLength(1);
 	});
 
 	it("ne bascule pas pour une alerte en mode keys", () => {
 		const { controller, switches } = setup([xl]);
-		controller.sync({ alertId: "k", fullscreen: false, anyFullscreen: false });
+		controller.sync({ token: "k", fullscreen: false, anyFullscreen: false });
 		expect(switches).toEqual([]);
 	});
 
-	it("détecte une sortie manuelle du profil et ne force pas le retour", async () => {
-		const { controller, switches, visible } = setup([xl]);
+	it("détecte une sortie manuelle, même vers une page qui contient des Alert keys", async () => {
+		const { controller, switches, show } = setup([xl]);
 		controller.sync(full("a"));
-		visible.set("XL", 32);
-		controller.keysChanged("XL");
-		// L'utilisateur change de profil : toutes les Alert keys disparaissent.
-		visible.set("XL", 0);
-		controller.keysChanged("XL");
-		await vi.advanceTimersByTimeAsync(1000);
+		show("XL");
+		// La grille n'est plus entièrement couverte : l'utilisateur a changé de page.
+		show("XL", false);
+		await vi.advanceTimersByTimeAsync(500);
 		expect(controller.isInAlertProfile("XL")).toBe(false);
-		// Pas de retour automatique à la fin de l'alerte…
+		// Pas de retour automatique à la fin de l'alerte.
 		controller.sync(null);
 		expect(switches).toHaveLength(1);
 	});
 
-	it("ne rebascule pas pour la même alerte après une sortie manuelle, mais pour une nouvelle", async () => {
-		const { controller, switches } = setup([xl]);
+	it("ignore une disparition passagère du profil Alerte", async () => {
+		const { controller, show } = setup([xl]);
 		controller.sync(full("a"));
-		controller.keysChanged("XL");
+		show("XL");
+		show("XL", false);
+		await vi.advanceTimersByTimeAsync(200);
+		show("XL");
 		await vi.advanceTimersByTimeAsync(1000);
-		controller.sync(full("a"));
+		expect(controller.isInAlertProfile("XL")).toBe(true);
+	});
+
+	it("après une sortie manuelle, rebascule pour une alerte renvoyée par HA, pas pour la même", async () => {
+		const { controller, switches, show } = setup([xl]);
+		controller.sync(full("sonnette@1"));
+		show("XL");
+		show("XL", false);
+		await vi.advanceTimersByTimeAsync(500);
+		controller.sync(full("sonnette@1"));
 		expect(switches).toHaveLength(1);
-		controller.sync(full("b"));
+		controller.sync(full("sonnette@2"));
 		expect(switches).toHaveLength(2);
 	});
 
-	it("tolère la disparition momentanée des touches pendant la bascule", async () => {
-		const { controller, visible } = setup([xl]);
+	it("reshow() rebascule les appareils dont on avait quitté le profil", async () => {
+		const { controller, switches, show } = setup([xl]);
 		controller.sync(full("a"));
-		controller.keysChanged("XL");
-		await vi.advanceTimersByTimeAsync(300);
-		visible.set("XL", 32);
-		controller.keysChanged("XL");
-		await vi.advanceTimersByTimeAsync(1000);
+		show("XL");
+		show("XL", false);
+		await vi.advanceTimersByTimeAsync(500);
+		controller.reshow();
+		expect(switches).toHaveLength(2);
+	});
+
+	it("ne rebascule pas un appareil qui affiche déjà le profil Alerte (redémarrage)", () => {
+		const { controller, switches, show } = setup([xl]);
+		show("XL");
+		controller.sync(full("a"));
+		expect(switches).toEqual([]);
 		expect(controller.isInAlertProfile("XL")).toBe(true);
+		controller.sync(null);
+		expect(switches).toEqual([["XL", undefined]]);
+	});
+
+	it("leave() ne ramène en arrière que si le profil Alerte est affiché", () => {
+		const { controller, switches, show } = setup([xl]);
+		controller.leave("XL");
+		expect(switches).toEqual([]);
+		show("XL");
+		controller.leave("XL");
+		expect(switches).toEqual([["XL", undefined]]);
 	});
 
 	it("rebascule un appareil reconnecté pendant une alerte", () => {

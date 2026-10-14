@@ -51,8 +51,9 @@ export function backoffDelay(attempt: number, random: () => number = Math.random
 }
 
 /**
- * Normalise l'URL saisie : accepte aussi `http(s)://hôte:8123` ou un simple `hôte:8123`,
- * et renvoie l'URL WebSocket complète (`ws(s)://…/api/websocket`), ou `null` si elle est invalide.
+ * Normalise l'URL saisie : accepte aussi `http(s)://hôte:8123`, un simple `hôte:8123` ou une
+ * adresse de tableau de bord copiée depuis le navigateur, et renvoie l'URL WebSocket complète
+ * (`ws(s)://…/api/websocket`), ou `null` si elle est invalide.
  */
 export function normalizeHaUrl(input: string): string | null {
 	let value = input.trim();
@@ -67,11 +68,19 @@ export function normalizeHaUrl(input: string): string | null {
 	if (url.protocol === "http:") url.protocol = "ws:";
 	else if (url.protocol === "https:") url.protocol = "wss:";
 	else if (url.protocol !== "ws:" && url.protocol !== "wss:") return null;
-	if (url.pathname === "/" || url.pathname === "") url.pathname = "/api/websocket";
+	// Une adresse copiée depuis le navigateur (« /lovelace/0 »…) pointe vers l'interface :
+	// on la remplace par celle de l'API WebSocket, en gardant un éventuel préfixe de proxy.
+	const api = url.pathname.indexOf("/api/websocket");
+	url.pathname = api >= 0 ? url.pathname.slice(0, api) + "/api/websocket" : "/api/websocket";
 	url.search = "";
 	url.hash = "";
 	return url.toString();
 }
+
+/** Requête refusée par Home Assistant (réponse `result` avec `success: false`). */
+export class HaResultError extends Error {}
+/** Pas de réponse de Home Assistant dans le délai. */
+export class HaTimeoutError extends Error {}
 
 interface Pending {
 	resolve(result: unknown): void;
@@ -102,6 +111,8 @@ export class HaClient {
 	#stopped = true;
 	#reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 	#pingTimer: ReturnType<typeof setInterval> | null = null;
+	/** Délai pour recevoir `auth_ok` ou `auth_invalid` après l'ouverture de la connexion. */
+	#authTimer: ReturnType<typeof setTimeout> | null = null;
 	readonly #pending = new Map<number, Pending>();
 
 	constructor(options: HaClientOptions) {
@@ -151,6 +162,13 @@ export class HaClient {
 		}
 		this.#socket = socket;
 		this.#nextId = 1;
+		// Serveur qui accepte le WebSocket sans être Home Assistant, ou qui ne répond plus.
+		this.#authTimer = setTimeout(() => {
+			this.#authTimer = null;
+			if (this.#socket !== socket) return;
+			this.#closeSocket();
+			this.#scheduleReconnect("pas de réponse d'authentification (est-ce bien l'adresse de Home Assistant ?)");
+		}, this.#responseTimeoutMs);
 
 		socket.onmessage = (ev) => {
 			if (this.#socket !== socket) return;
@@ -166,6 +184,7 @@ export class HaClient {
 			if (this.#socket !== socket) return;
 			this.#socket = null;
 			this.#stopPing();
+			this.#clearAuthTimer();
 			this.#rejectPending(new Error("Connexion fermée"));
 			if (this.#state === "auth_failed" || this.#stopped) return;
 			this.#scheduleReconnect("connexion fermée");
@@ -180,10 +199,12 @@ export class HaClient {
 				this.#socket?.send(JSON.stringify({ type: "auth", access_token: this.#options.token }));
 				return;
 			case "auth_invalid":
+				this.#clearAuthTimer();
 				this.#setState("auth_failed", message.message ?? "token refusé");
 				this.#closeSocket();
 				return;
 			case "auth_ok":
+				this.#clearAuthTimer();
 				this.#attempt = 0;
 				void this.#subscribe(message.ha_version);
 				this.#startPing();
@@ -201,15 +222,23 @@ export class HaClient {
 	}
 
 	async #subscribe(version: string | undefined): Promise<void> {
+		const socket = this.#socket;
 		try {
 			for (const eventType of this.#options.eventTypes) {
 				await this.#request({ type: "subscribe_events", event_type: eventType });
 			}
-			this.#setState("connected", version ? `Home Assistant ${version}` : undefined);
+			if (this.#socket === socket) this.#setState("connected", version ? `Home Assistant ${version}` : undefined);
 		} catch (error) {
-			const detail = error instanceof Error ? error.message : String(error);
+			// Connexion perdue ou remplacée entre-temps : la reconnexion s'en occupe.
+			if (this.#socket !== socket || !(error instanceof HaResultError)) {
+				if (this.#socket === socket && error instanceof HaTimeoutError) {
+					this.#closeSocket();
+					this.#scheduleReconnect("abonnement sans réponse");
+				}
+				return;
+			}
 			// HA réserve l'écoute des événements personnalisés aux administrateurs.
-			this.#setState("forbidden", `abonnement refusé (${detail}) : le token doit appartenir à un administrateur`);
+			this.#setState("forbidden", `abonnement refusé (${error.message}) : le token doit appartenir à un administrateur`);
 		}
 	}
 
@@ -220,7 +249,7 @@ export class HaClient {
 		return new Promise((resolve, reject) => {
 			const timer = setTimeout(() => {
 				this.#pending.delete(id);
-				reject(new Error("Pas de réponse de Home Assistant"));
+				reject(new HaTimeoutError("Pas de réponse de Home Assistant"));
 			}, this.#responseTimeoutMs);
 			this.#pending.set(id, { resolve, reject, timer });
 			socket.send(JSON.stringify({ id, ...payload }));
@@ -236,16 +265,18 @@ export class HaClient {
 		if (message.type === "pong" || message.success) {
 			pending.resolve(message.result);
 		} else {
-			pending.reject(new Error(message.error?.message ?? message.error?.code ?? "erreur inconnue"));
+			pending.reject(new HaResultError(message.error?.message ?? message.error?.code ?? "erreur inconnue"));
 		}
 	}
 
 	#startPing(): void {
 		this.#stopPing();
 		this.#pingTimer = setInterval(() => {
-			// Sans `pong` dans le délai, on considère la connexion morte et on la relance.
-			this.#request({ type: "ping" }).catch(() => {
-				if (!this.#stopped && this.#state !== "auth_failed") this.#connect();
+			const socket = this.#socket;
+			// Sans `pong` dans le délai, on considère la connexion morte et on la relance. Une
+			// connexion déjà fermée est gérée par `onclose` (avec le délai progressif).
+			this.#request({ type: "ping" }).catch((error: unknown) => {
+				if (error instanceof HaTimeoutError && this.#socket === socket && !this.#stopped) this.#connect();
 			});
 		}, this.#pingIntervalMs);
 	}
@@ -286,6 +317,12 @@ export class HaClient {
 		if (this.#reconnectTimer) clearTimeout(this.#reconnectTimer);
 		this.#reconnectTimer = null;
 		this.#stopPing();
+		this.#clearAuthTimer();
+	}
+
+	#clearAuthTimer(): void {
+		if (this.#authTimer) clearTimeout(this.#authTimer);
+		this.#authTimer = null;
 	}
 
 	#rejectPending(error: Error): void {

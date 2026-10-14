@@ -75,7 +75,7 @@ describe("svg", () => {
 describe("keyImage", () => {
 	/** Contexte avec une seule alerte affichée, hors profil Alerte. */
 	const displayed = (fields: Partial<Alert>, startedAt = 0): RenderContext => ({
-		displayed: { alert: alert(fields), startedAt } satisfies DisplayedAlert,
+		displayed: { alert: alert(fields), startedAt, receivedAt: 0 } satisfies DisplayedAlert,
 		position: { index: 1, total: 1 },
 		isInAlertProfile: () => false,
 	});
@@ -105,7 +105,7 @@ describe("keyImage", () => {
 
 	describe("dans le profil Alerte avec plusieurs alertes", () => {
 		const queued = (total: number): RenderContext => ({
-			displayed: { alert: alert({ pattern: "solid" }), startedAt: 0 },
+			displayed: { alert: alert({ pattern: "solid" }), startedAt: 0, receivedAt: 0 },
 			position: { index: 1, total },
 			isInAlertProfile: () => true,
 		});

@@ -14,8 +14,18 @@ export const LINE_HEIGHT = 1.15;
 const NARROW = new Set("iljtfrI.,;:!'|() ");
 const WIDE = new Set("MWmw@%&");
 
+/** Emoji et pictogrammes (affichés plus larges qu'une lettre). */
+const PICTOGRAPHIC = /\p{Extended_Pictographic}/u;
+/** Écritures à caractères pleine chasse (CJK, hangul…). */
+const FULL_WIDTH = /[\u1100-\u115f\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\uff00-\uff60\uffe0-\uffe6]/u;
+/** Caractères sans largeur (sélecteurs de variante, liants d'emoji). */
+const ZERO_WIDTH = /[\u200d\ufe0e\ufe0f]/u;
+
 /** Largeur estimée d'un caractère, en fraction de la taille de police. */
 function charWidth(ch: string): number {
+	if (ZERO_WIDTH.test(ch)) return 0;
+	if (PICTOGRAPHIC.test(ch)) return 1.2;
+	if (FULL_WIDTH.test(ch)) return 1;
 	if (NARROW.has(ch)) return 0.34;
 	if (WIDE.has(ch)) return 0.92;
 	if (/[0-9]/.test(ch)) return 0.58;
@@ -178,11 +188,48 @@ function rowCenter(row: number): number {
 	return row * (KEY_PX + GAP_PX) + KEY_PX / 2;
 }
 
+/** Taille de police maximale d'une ligne qui occupe `rows` rangées de touches. */
+function blockFontSize(rows: number): number {
+	return rows === 1 ? ROW_FONT_SIZE : Math.floor((rows * KEY_PX + (rows - 1) * GAP_PX) * 0.75);
+}
+
+/**
+ * Texte sur plusieurs lignes : chaque ligne occupe un bloc de rangées (une seule rangée si la
+ * grille est juste assez haute, plusieurs sinon : 2 lignes sur un XL de 4 rangées occupent
+ * 2 rangées chacune). On garde la répartition qui donne le plus grand texte.
+ */
+function fitMultiline(text: string, grid: Grid, width: number): BannerLayout | null {
+	let best: { lines: readonly string[]; fontSize: number; rowsPerLine: number } | null = null;
+	for (let maxLines = 2; maxLines <= grid.rows; maxLines++) {
+		const fitted = fitText(text, { width, height: Number.POSITIVE_INFINITY }, {
+			maxLines,
+			max: blockFontSize(Math.floor(grid.rows / maxLines)),
+			min: Math.floor(BANNER_MIN_STATIC),
+		});
+		if (!fitted || fitted.lines.length < 2) continue;
+		// Moins de lignes que prévu : chacune peut occuper plus de rangées, mais la police
+		// retenue a déjà été plafonnée pour `maxLines`.
+		const rowsPerLine = Math.floor(grid.rows / fitted.lines.length);
+		if (!best || fitted.fontSize > best.fontSize) best = { ...fitted, rowsPerLine };
+	}
+	if (!best) return null;
+
+	const { lines, fontSize, rowsPerLine } = best;
+	const first = Math.floor((grid.rows - lines.length * rowsPerLine) / 2);
+	const blockOffset = ((rowsPerLine - 1) * (KEY_PX + GAP_PX)) / 2;
+	return {
+		kind: "static",
+		lines,
+		fontSize,
+		centers: lines.map((_, i) => rowCenter(first + i * rowsPerLine) + blockOffset),
+	};
+}
+
 /**
  * Texte géant étalé sur toute la grille, par ordre de préférence :
  * 1. une seule ligne, aussi grande que possible (jusqu'aux 3/4 de la hauteur) ;
- * 2. plusieurs lignes, chacune centrée sur une rangée de touches pour que les espaces
- *    entre rangées ne coupent pas les lettres ;
+ * 2. plusieurs lignes, chacune centrée sur une rangée (ou un bloc de rangées) de touches,
+ *    pour que les espaces entre rangées ne coupent pas les petites lettres ;
  * 3. une ligne défilante, alignée sur la rangée du milieu.
  */
 export function layoutBanner(text: string, grid: Grid): BannerLayout {
@@ -209,21 +256,13 @@ function computeBannerLayout(text: string, grid: Grid): BannerLayout {
 		max: Math.floor(canvas.height * 0.75),
 		min: Math.floor(BANNER_MIN_STATIC),
 	});
-	if (single) {
+	const multi = grid.rows > 1 ? fitMultiline(text, grid, width) : null;
+	// On garde la mise en page qui donne le plus grand texte (« Linge propre » sur un XL :
+	// plus grand sur deux lignes de deux rangées que sur une seule ligne).
+	if (single && (!multi || single.fontSize >= multi.fontSize)) {
 		return { kind: "static", ...single, centers: [canvas.height / 2] };
 	}
-
-	if (grid.rows > 1) {
-		const multi = fitText(text, { width, height: Number.POSITIVE_INFINITY }, {
-			maxLines: grid.rows,
-			max: ROW_FONT_SIZE,
-			min: Math.floor(BANNER_MIN_STATIC),
-		});
-		if (multi) {
-			const first = Math.floor((grid.rows - multi.lines.length) / 2);
-			return { kind: "static", ...multi, centers: multi.lines.map((_, i) => rowCenter(first + i)) };
-		}
-	}
+	if (multi) return multi;
 
 	// Une seule ligne défilante : les retours à la ligne deviennent des séparateurs.
 	const line = paragraphs(text)

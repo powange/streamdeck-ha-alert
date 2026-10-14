@@ -76,9 +76,7 @@ export class AlertKey extends SingletonAction<AlertKeySettings> {
 		if (!manager.current()) {
 			// Hors alerte, une touche du profil Alerte (reconnu à ce qu'il ne contient que des
 			// Alert keys) ramène au profil précédent : utile si on y est resté coincé.
-			if (handle && profiles.hasProfile(device.type) && registry.onDevice(device.id).length >= handle.grid.columns * handle.grid.rows) {
-				profiles.leave(device.id);
-			}
+			if (profiles.hasProfile(device.type)) profiles.leave(device.id);
 			return;
 		}
 

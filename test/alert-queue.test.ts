@@ -27,17 +27,25 @@ describe("AlertQueue", () => {
 		expect(queue.current()?.alert.text).toBe("v2");
 	});
 
-	it("calcule l'expiration à partir de duration_s, sans expiration si 0", () => {
+	it("ne démarre le décompte de duration_s qu'au premier affichage, pas d'expiration si 0", () => {
 		const queue = new AlertQueue();
-		expect(queue.upsert(alert({ id: "a", duration_s: 30 }), 1000).expiresAt).toBe(31_000);
-		expect(queue.upsert(alert({ id: "b", duration_s: 0 }), 1000).expiresAt).toBeNull();
-		expect(queue.nextExpiry()).toBe(31_000);
+		expect(queue.upsert(alert({ id: "a", duration_s: 30 }), 1000).expiresAt).toBeNull();
+		queue.upsert(alert({ id: "b", duration_s: 0 }), 1000);
+		expect(queue.nextExpiry()).toBeNull();
+		queue.markDisplayed("a", 5000);
+		expect(queue.nextExpiry()).toBe(35_000);
+		// Un second affichage ne relance pas le décompte.
+		queue.markDisplayed("a", 9000);
+		expect(queue.nextExpiry()).toBe(35_000);
+		queue.markDisplayed("b", 5000);
+		expect(queue.nextExpiry()).toBe(35_000);
 	});
 
 	it("retire les alertes expirées et passe à la suivante", () => {
 		const queue = new AlertQueue();
 		queue.upsert(alert({ id: "court", priority: 9, duration_s: 5 }), 0);
 		queue.upsert(alert({ id: "long", priority: 1, duration_s: 0 }), 0);
+		queue.markDisplayed("court", 0);
 		expect(queue.expire(4_999)).toEqual([]);
 		expect(queue.expire(5_000).map((q) => q.alert.id)).toEqual(["court"]);
 		expect(queue.current()?.alert.id).toBe("long");

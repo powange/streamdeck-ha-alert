@@ -50,4 +50,16 @@ export class KeyRegistry {
 	onDevice(deviceId: string): AlertKeyHandle[] {
 		return [...this.#keys.values()].filter((key) => key.deviceId === deviceId);
 	}
+
+	/**
+	 * Vrai si toutes les touches de l'appareil sont des Alert keys visibles : c'est le cas du
+	 * profil Alerte, et pratiquement jamais d'une page normale.
+	 */
+	coversDevice(deviceId: string): boolean {
+		const keys = this.onDevice(deviceId);
+		const grid = keys[0]?.grid;
+		if (!grid) return false;
+		const positions = new Set(keys.flatMap((key) => (key.position ? [`${key.position.column},${key.position.row}`] : [])));
+		return positions.size >= grid.columns * grid.rows;
+	}
 }

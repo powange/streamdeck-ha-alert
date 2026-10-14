@@ -191,6 +191,30 @@ describe("bannière (texte géant sur toute la grille)", () => {
 		if (layout.kind === "static") expect(layout.lines).toEqual(["Repas", "prêt"]);
 	});
 
+	it("agrandit les lignes en leur donnant plusieurs rangées quand la grille le permet", () => {
+		// « Linge / propre » sur un XL (4 rangées) : chaque ligne occupe 2 rangées.
+		const layout = layoutBanner("Linge\npropre", XL);
+		expect(layout.kind).toBe("static");
+		if (layout.kind !== "static") return;
+		expect(layout.lines).toEqual(["Linge", "propre"]);
+		// Plus du double de la taille d'une ligne limitée à une rangée (80 % d'une touche).
+		expect(layout.fontSize).toBeGreaterThan(2 * Math.floor(KEY_PX * 0.8));
+		// Centres des blocs : entre les rangées 0-1 et entre les rangées 2-3.
+		expect(layout.centers).toEqual([KEY_PX + 18, 3 * (KEY_PX + 36) - 18]);
+	});
+
+	it("préfère deux grandes lignes à une seule ligne plus petite", () => {
+		const layout = layoutBanner("Linge propre", XL);
+		expect(layout.kind === "static" && layout.lines).toEqual(["Linge", "propre"]);
+	});
+
+	it("estime plus large un emoji ou un caractère chinois qu'une lettre", () => {
+		expect(estimateTextWidth("🔔", 100)).toBeGreaterThan(estimateTextWidth("a", 100));
+		expect(estimateTextWidth("門", 100)).toBeGreaterThan(estimateTextWidth("a", 100));
+		// Le sélecteur de variante d'un emoji n'ajoute pas de largeur.
+		expect(estimateTextWidth("❤️", 100)).toBe(estimateTextWidth("❤", 100));
+	});
+
 	it("joint les lignes par « · » dans un texte défilant", () => {
 		const layout = layoutBanner("La machine à laver est terminée\npense à étendre le linge tout de suite", MK2);
 		expect(layout.kind).toBe("scroll");

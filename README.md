@@ -33,7 +33,7 @@ Le plugin ajoute une catégorie **HA Alert** avec deux actions :
 
 | Action | Rôle |
 |---|---|
-| **Statut HA** | Configure la connexion à Home Assistant et affiche son état. |
+| **Statut HA** | Configure la connexion à Home Assistant, affiche son état et le nombre d'alertes en cours. Appui court : réaffiche les alertes en plein écran si tu as quitté le profil Alerte. Appui long : alerte de test (locale, sans Home Assistant). |
 | **Alert key** | Touche qui s'anime pendant une alerte. Hors alerte, elle prend l'apparence réglée dans son inspecteur (fond, texte, icône). |
 
 ## 2. Créer un token dans Home Assistant
@@ -50,7 +50,7 @@ Le plugin se connecte à Home Assistant avec un **jeton d'accès longue durée**
 
 1. Glisse l'action **Statut HA** sur une touche du Stream Deck.
 2. Dans son inspecteur (en bas de la fenêtre du logiciel Stream Deck) :
-   - **URL** : l'adresse de ton Home Assistant, par exemple `http://homeassistant.local:8123` ou `https://ha.mondomaine.fr`. Elle est convertie automatiquement en adresse WebSocket (`ws(s)://…/api/websocket`).
+   - **URL** : l'adresse de ton Home Assistant, par exemple `http://homeassistant.local:8123` ou `https://ha.mondomaine.fr`. Tu peux aussi coller l'adresse d'un tableau de bord copiée depuis le navigateur : elle est convertie automatiquement en adresse WebSocket (`ws(s)://…/api/websocket`).
    - **Token** : le jeton créé à l'étape précédente.
 3. Clique sur **Tester la connexion** : le message « ✔ Connecté à Home Assistant … » doit s'afficher.
 
@@ -138,7 +138,7 @@ text: "{{ states('sensor.temperature_congelateur') }} °C au congélateur !"
 | Champ | Valeurs | Défaut | Rôle |
 |---|---|---|---|
 | `id` | texte | — | Identifiant unique. Une alerte avec le même `id` remplace la précédente. |
-| `text` | texte (200 caractères max.) | vide | Texte affiché. Un retour à la ligne (ou `\n`) force une nouvelle ligne. |
+| `text` | texte | vide | Texte affiché. Un retour à la ligne (ou `\n`) force une nouvelle ligne. Au-delà de 200 caractères, il est tronqué avec « … ». |
 | `mode` | `fullscreen`, `keys` | `fullscreen` | Plein écran ou touches choisies ([détails](#8-plein-écran-ou-touches-choisies)). |
 | `pattern` | `blink`, `pulse`, `chase`, `solid`, `rainbow` | `blink` | Clignotement, pulsation, chenillard, fixe ou arc-en-ciel. |
 | `color` | `#rrggbb`, `#rgb` ou `[r, g, b]` | `#ff0000` | Couleur principale. |
@@ -148,11 +148,11 @@ text: "{{ states('sensor.temperature_congelateur') }} °C au congélateur !"
 | `text_style` | `banner`, `key` | `banner` en plein écran, `key` sinon | Texte géant sur tout le Stream Deck, ou répété sur chaque touche. |
 | `icon` | `none`, `bell`, `door`, `warning`, `info`, `check`, `washer` | `none` | Icône affichée au-dessus du texte (style `key` uniquement). |
 | `interval_ms` | 100 à 10 000 | 500 | Durée d'une étape de l'animation, en millisecondes. |
-| `duration_s` | 0 à 86 400 | 30 | Durée d'affichage sans acquittement, en secondes. `0` : jusqu'à l'acquittement ou un effacement. |
+| `duration_s` | 0 à 86 400 | 30 | Durée d'affichage sans acquittement, en secondes, comptée à partir du premier affichage (une alerte en attente derrière une autre ne disparaît pas sans avoir été vue). `0` : jusqu'à l'acquittement ou un effacement. |
 | `priority` | -1000 à 1000 | 0 | La plus prioritaire s'affiche en premier. |
 | `ack_required` | `true`, `false` | `false` | Envoie `streamdeck_alert_ack` à Home Assistant lors d'un appui. |
 
-**Texte géant (`banner`) :** un texte court s'affiche en très gros sur toute la hauteur ; un texte plus long est réparti en lignes, une par rangée de touches ; un texte trop long défile. Les espaces entre les touches coupent un peu les lettres, comme sur un panneau lumineux.
+**Texte géant (`banner`) :** un texte court s'affiche en très gros sur toute la hauteur ; un texte plus long est réparti en lignes, chacune sur une ou plusieurs rangées de touches (sur un XL, deux lignes occupent deux rangées chacune) ; un texte trop long défile. Les espaces entre les touches coupent un peu les lettres, comme sur un panneau lumineux.
 
 Événement `streamdeck_alert_clear` : `id` pour effacer une alerte, rien pour tout effacer.
 
@@ -162,7 +162,9 @@ text: "{{ states('sensor.temperature_congelateur') }} °C au congélateur !"
 
 Chaque Stream Deck qui dispose d'un profil Alerte bascule dessus, affiche l'alerte sur toutes ses touches, puis revient sur la page d'origine quand l'alerte se termine (appui, fin de durée ou effacement). Avec plusieurs Stream Deck, tous basculent, et un appui sur l'un d'eux les libère tous.
 
-Si tu quittes toi-même le profil Alerte pendant une alerte, le plugin ne t'y ramène pas, et ne fait pas de retour automatique à la fin.
+Si tu quittes toi-même le profil Alerte pendant une alerte, le plugin ne t'y ramène pas, et ne fait pas de retour automatique à la fin. Un appui court sur la touche **Statut HA** réaffiche les alertes ; une alerte renvoyée par Home Assistant (nouvelle sonnerie) rebascule aussi le Stream Deck.
+
+Si le profil Alerte ne s'affiche pas (non installé, installation refusée), l'alerte reste sur les Alert keys de la page visible, et le plugin ne change pas de profil à la fin.
 
 ### Touches choisies (`mode: keys`)
 
@@ -192,12 +194,34 @@ En plein écran, dès qu'au moins deux alertes attendent :
 
 ## 10. Réagir à l'acquittement
 
-Le plugin envoie deux événements à Home Assistant :
+Le plugin envoie trois événements à Home Assistant :
 
 | Événement | Quand | Données |
 |---|---|---|
 | `streamdeck_alert_ack` | Appui sur le Stream Deck, si l'alerte a `ack_required: true` | `id`, `device` (nom du Stream Deck), `device_id` |
 | `streamdeck_alert_expired` | Fin de `duration_s` sans appui | `id` |
+| `streamdeck_alert_ready` | À chaque connexion ou reconnexion à Home Assistant | `active` : liste des `id` encore affichés |
+
+Si Home Assistant est injoignable au moment d'un acquittement ou d'une expiration, l'événement est envoyé à la reconnexion (s'il a moins de 15 minutes).
+
+`streamdeck_alert_ready` sert à faire le ménage après une coupure : un effacement envoyé pendant que le Stream Deck était déconnecté a été perdu. Par exemple, pour effacer la sonnette si la porte a été ouverte entre-temps :
+
+```yaml
+triggers:
+  - trigger: event
+    event_type: streamdeck_alert_ready
+conditions:
+  - condition: template
+    value_template: "{{ 'sonnette' in trigger.event.data.active }}"
+  - condition: state
+    entity_id: binary_sensor.porte_entree
+    state: "off"
+    for: "00:00:30"
+actions:
+  - action: script.streamdeck_alert_clear
+    data:
+      id: sonnette
+```
 
 Exemple de déclencheur :
 
@@ -217,7 +241,7 @@ Voir [`automations/acquittement.yaml`](homeassistant/automations/acquittement.ya
 |---|---|
 | « Token refusé » | Recrée un jeton (étape 2) et colle-le à nouveau. |
 | « Pas admin » | Crée le jeton depuis un compte administrateur. |
-| « Hors ligne » | Vérifie l'URL (ouvre-la dans un navigateur) ; le plugin se reconnecte tout seul dès que Home Assistant répond. |
+| « Hors ligne » | Vérifie l'URL (ouvre-la dans un navigateur) ; le plugin se reconnecte tout seul dès que Home Assistant répond. Le journal du plugin indique la raison (« pas de réponse d'authentification » : l'adresse ne mène pas à Home Assistant). |
 | Rien ne s'affiche en plein écran | Ton modèle de Stream Deck n'a peut-être pas encore de profil Alerte (voir ci-dessous) : l'alerte s'affiche alors seulement sur les Alert keys de la page visible. |
 | Rien ne s'affiche en mode `keys` | Il faut des Alert keys sur la page affichée, aux index indiqués dans `keys`. |
 | Alerte ignorée | Les données sont invalides (couleur mal écrite, motif inconnu…) : le détail est dans le journal du plugin, `%APPDATA%\Elgato\StreamDeck\Plugins\com.powange.ha-alert.sdPlugin\logs\`. |
@@ -259,6 +283,8 @@ Sans profil pour un appareil, une alerte `fullscreen` s'affiche seulement sur le
 5. **Supprimer le profil d'origine.** Une fois le plugin réinstallé, le logiciel installe le profil fourni par le plugin, sous le nom « HA Alert copie » si « HA Alert » existe déjà. C'est celui-là que le plugin utilise : supprime l'original créé à la main, puis renomme la copie si tu veux.
 
 ## Développement
+
+Les inspecteurs utilisent [sdpi-components](https://sdpi-components.dev) v4.0.1 (licence MIT, inclut Lit sous licence BSD-3-Clause), livré dans `ui/sdpi-components.js` pour fonctionner sans connexion Internet.
 
 ```bash
 npm install

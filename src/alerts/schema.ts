@@ -51,15 +51,21 @@ const keyList = z.preprocess((value) => {
 }, z.array(keyIndex).optional());
 
 /**
- * Retire les champs `null` ou vides : un script Home Assistant transmet `null` pour un champ
- * optionnel non renseigné, qui doit alors prendre sa valeur par défaut.
+ * Retire les champs vides : un script Home Assistant transmet `null` (ou, selon le rendu du
+ * template, le texte « None ») pour un champ optionnel non renseigné, qui doit alors prendre sa
+ * valeur par défaut. « None » avec une majuscule n'est une valeur valide d'aucun champ.
  */
 function withoutEmptyFields(data: unknown): unknown {
 	if (typeof data !== "object" || data === null || Array.isArray(data)) return data;
 	return Object.fromEntries(
-		Object.entries(data).filter(([, value]) => value !== null && !(typeof value === "string" && value.trim() === "")),
+		Object.entries(data).filter(
+			([, value]) => value !== null && !(typeof value === "string" && (value.trim() === "" || value.trim() === "None")),
+		),
 	);
 }
+
+/** Longueur maximale du texte ; au-delà, il est tronqué avec « … » plutôt que refusé. */
+export const MAX_TEXT_LENGTH = 200;
 
 /** Schéma de l'événement `streamdeck_alert`. */
 export const alertSchema = z.preprocess(
@@ -73,7 +79,10 @@ export const alertSchema = z.preprocess(
 			color2: color.default("#000000"),
 			keys: keyList,
 			key_colors: z.record(z.string().regex(/^\d+$/, "index de touche attendu"), color).default({}),
-			text: z.coerce.string().max(200).default(""),
+			text: z.coerce
+				.string()
+				.transform((text) => (text.length > MAX_TEXT_LENGTH ? `${text.slice(0, MAX_TEXT_LENGTH - 1).trimEnd()}…` : text))
+				.default(""),
 			/** Absent : texte géant (`banner`) en mode `fullscreen`, texte par touche (`key`) en mode `keys`. */
 			text_style: z.enum(["key", "banner"]).optional(),
 			icon: z.enum(ICONS).default("none"),

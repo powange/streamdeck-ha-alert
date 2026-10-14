@@ -68,6 +68,29 @@ describe("AlertManager", () => {
 		expect(manager.current()?.alert.id).toBe("a");
 	});
 
+	it("ne fait pas expirer une alerte en attente qui n'a pas encore été affichée", async () => {
+		const { manager, fired } = setup();
+		manager.handleAlert(alert({ id: "sonnette", priority: 9, duration_s: 0 }));
+		manager.handleAlert(alert({ id: "linge", priority: 1, duration_s: 60 }));
+		await vi.advanceTimersByTimeAsync(120_000);
+		expect(manager.size).toBe(2);
+		manager.acknowledge(DEVICE);
+		expect(manager.current()?.alert.id).toBe("linge");
+		await vi.advanceTimersByTimeAsync(59_999);
+		expect(manager.current()?.alert.id).toBe("linge");
+		await vi.advanceTimersByTimeAsync(1);
+		expect(fired).toEqual([["streamdeck_alert_expired", { id: "linge" }]]);
+	});
+
+	it("expose les ids actifs et la date de réception de l'alerte affichée", () => {
+		const { manager } = setup();
+		vi.setSystemTime(500);
+		manager.handleAlert(alert({ id: "a", priority: 1 }));
+		manager.handleAlert(alert({ id: "b", priority: 2 }));
+		expect(manager.activeIds()).toEqual(["b", "a"]);
+		expect(manager.current()?.receivedAt).toBe(500);
+	});
+
 	it("affiche l'alerte suivante après une expiration", async () => {
 		const { manager } = setup();
 		manager.handleAlert(alert({ id: "longue", priority: 1, duration_s: 60 }));

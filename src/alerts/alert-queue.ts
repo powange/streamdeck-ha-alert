@@ -5,8 +5,12 @@ export interface QueuedAlert {
 	readonly alert: Alert;
 	/** Horodatage de réception (ms). */
 	readonly receivedAt: number;
-	/** Horodatage d'expiration (ms), ou `null` si l'alerte reste jusqu'à l'acquittement ou un clear. */
-	readonly expiresAt: number | null;
+	/**
+	 * Horodatage d'expiration (ms) : `duration_s` compte à partir du premier affichage, pour qu'une
+	 * alerte en attente derrière une autre ne disparaisse pas sans avoir été vue. `null` tant que
+	 * l'alerte n'a pas été affichée, ou si elle reste jusqu'à l'acquittement (`duration_s: 0`).
+	 */
+	expiresAt: number | null;
 	/** Numéro d'ordre d'arrivée : départage les alertes de même priorité (la plus récente d'abord). */
 	readonly seq: number;
 }
@@ -34,17 +38,20 @@ export class AlertQueue {
 	 * Si elle devient la plus prioritaire, l'affichage revient sur elle.
 	 */
 	upsert(alert: Alert, now: number): QueuedAlert {
-		const queued: QueuedAlert = {
-			alert,
-			receivedAt: now,
-			expiresAt: alert.duration_s > 0 ? now + alert.duration_s * 1000 : null,
-			seq: ++this.#seq,
-		};
+		const queued: QueuedAlert = { alert, receivedAt: now, expiresAt: null, seq: ++this.#seq };
 		this.#items.set(alert.id, queued);
 		if (this.top()?.alert.id === alert.id) {
 			this.#selectedId = null;
 		}
 		return queued;
+	}
+
+	/** Démarre le décompte de `duration_s` d'une alerte à son premier affichage. */
+	markDisplayed(id: string, now: number): void {
+		const queued = this.#items.get(id);
+		if (queued && queued.expiresAt === null && queued.alert.duration_s > 0) {
+			queued.expiresAt = now + queued.alert.duration_s * 1000;
+		}
 	}
 
 	/** Retire une alerte (acquittement ou clear ciblé). */

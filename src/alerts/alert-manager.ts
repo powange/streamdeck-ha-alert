@@ -49,6 +49,11 @@ export class AlertManager {
 		return this.#queue.position();
 	}
 
+	/** Vrai s'il reste au moins une alerte `fullscreen` dans la file. */
+	anyFullscreen(): boolean {
+		return this.#queue.list().some((q) => q.alert.mode === "fullscreen");
+	}
+
 	/** Nombre d'alertes actives. */
 	get size(): number {
 		return this.#queue.size;

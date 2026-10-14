@@ -9,24 +9,31 @@ import {
 
 import type { AlertManager } from "../alerts/alert-manager";
 import type { AlertKeyHandle, KeyRegistry } from "../devices/key-registry";
+import type { ProfileController } from "../devices/profile-controller";
 import type { Animator } from "../render/animator";
 import { idleLookFrom, type AlertKeySettings } from "../render/key-image";
+import { keyRole } from "../render/layout";
+
+/** Services partagés utilisés par l'action. */
+export interface AlertKeyServices {
+	readonly registry: KeyRegistry;
+	readonly animator: Animator;
+	readonly manager: AlertManager;
+	readonly profiles: ProfileController;
+}
 
 /**
  * Touche d'affichage des alertes. Hors alerte, elle montre l'apparence réglée dans son
- * inspecteur ; pendant une alerte, elle est animée, et un appui acquitte l'alerte affichée.
+ * inspecteur ; pendant une alerte, elle est animée, et un appui acquitte l'alerte affichée
+ * (ou parcourt la file, pour les touches ◀ ▶ ✖✖ du profil Alerte).
  */
 @action({ UUID: "com.powange.ha-alert.alert-key" })
 export class AlertKey extends SingletonAction<AlertKeySettings> {
-	readonly #registry: KeyRegistry;
-	readonly #animator: Animator;
-	readonly #manager: AlertManager;
+	readonly #services: AlertKeyServices;
 
-	constructor(registry: KeyRegistry, animator: Animator, manager: AlertManager) {
+	constructor(services: AlertKeyServices) {
 		super();
-		this.#registry = registry;
-		this.#animator = animator;
-		this.#manager = manager;
+		this.#services = services;
 	}
 
 	override onWillAppear(ev: WillAppearEvent<AlertKeySettings>): void {
@@ -43,23 +50,55 @@ export class AlertKey extends SingletonAction<AlertKeySettings> {
 			idle: idleLookFrom(ev.payload.settings),
 			setImage: (image) => keyAction.setImage(image),
 		};
-		this.#registry.add(handle);
-		this.#animator.draw(handle);
+		this.#services.registry.add(handle);
+		this.#services.animator.draw(handle);
+		this.#services.profiles.keysChanged(device.id);
 	}
 
 	override onWillDisappear(ev: WillDisappearEvent<AlertKeySettings>): void {
-		this.#registry.remove(ev.action.id);
-		this.#animator.forget(ev.action.id);
+		this.#services.registry.remove(ev.action.id);
+		this.#services.animator.forget(ev.action.id);
+		this.#services.profiles.keysChanged(ev.action.device.id);
 	}
 
 	override onDidReceiveSettings(ev: DidReceiveSettingsEvent<AlertKeySettings>): void {
-		const handle = this.#registry.get(ev.action.id);
+		const handle = this.#services.registry.get(ev.action.id);
 		if (!handle) return;
 		handle.idle = idleLookFrom(ev.payload.settings);
-		this.#animator.draw(handle);
+		this.#services.animator.draw(handle);
 	}
 
 	override onKeyDown(ev: KeyDownEvent<AlertKeySettings>): void {
-		this.#manager.acknowledge({ deviceId: ev.action.device.id, deviceName: ev.action.device.name });
+		const { registry, manager, profiles } = this.#services;
+		const device = ev.action.device;
+		const handle = registry.get(ev.action.id);
+
+		if (!manager.current()) {
+			// Hors alerte, une touche du profil Alerte (reconnu à ce qu'il ne contient que des
+			// Alert keys) ramène au profil précédent : utile si on y est resté coincé.
+			if (handle && profiles.hasProfile(device.type) && registry.onDevice(device.id).length >= handle.grid.columns * handle.grid.rows) {
+				profiles.leave(device.id);
+			}
+			return;
+		}
+
+		const role = handle?.position
+			? keyRole(handle.position, handle.grid, { inAlertProfile: profiles.isInAlertProfile(device.id), queueSize: manager.size })
+			: "alert";
+		const source = { deviceId: device.id, deviceName: device.name };
+		switch (role) {
+			case "prev":
+				manager.navigate(-1);
+				break;
+			case "next":
+				manager.navigate(1);
+				break;
+			case "clearAll":
+				manager.acknowledgeAll(source);
+				break;
+			case "alert":
+				manager.acknowledge(source);
+				break;
+		}
 	}
 }

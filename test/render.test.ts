@@ -5,8 +5,8 @@ import { alertSchema, type Alert } from "../src/alerts/schema";
 import type { AlertKeyHandle } from "../src/devices/key-registry";
 import { Animator, MIN_TICK_MS, tickInterval } from "../src/render/animator";
 import { computeKeyFrame } from "../src/render/frames";
-import { DEFAULT_IDLE, idleLookFrom, keyImage } from "../src/render/key-image";
-import { cacheSize, escapeXml, renderFrame, renderIdle } from "../src/render/svg";
+import { DEFAULT_IDLE, idleLookFrom, keyImage, type RenderContext } from "../src/render/key-image";
+import { cacheSize, escapeXml, renderControl, renderFrame, renderIdle } from "../src/render/svg";
 
 const MK2 = { columns: 5, rows: 3 };
 
@@ -73,10 +73,15 @@ describe("svg", () => {
 });
 
 describe("keyImage", () => {
-	const displayed = (fields: Partial<Alert>, startedAt = 0): DisplayedAlert => ({ alert: alert(fields), startedAt });
+	/** Contexte avec une seule alerte affichée, hors profil Alerte. */
+	const displayed = (fields: Partial<Alert>, startedAt = 0): RenderContext => ({
+		displayed: { alert: alert(fields), startedAt } satisfies DisplayedAlert,
+		position: { index: 1, total: 1 },
+		isInAlertProfile: () => false,
+	});
 
 	it("montre l'apparence de repos sans alerte", () => {
-		expect(keyImage(handle("k", 0, 0), undefined, 0)).toBe(renderIdle(DEFAULT_IDLE));
+		expect(keyImage(handle("k", 0, 0), { displayed: undefined, position: null, isInAlertProfile: () => false }, 0)).toBe(renderIdle(DEFAULT_IDLE));
 	});
 
 	it("montre l'alerte sur les touches ciblées seulement", () => {
@@ -96,6 +101,31 @@ describe("keyImage", () => {
 		const off = keyImage(handle("k", 0, 0), shown, 10_400);
 		expect(on).not.toBe(off);
 		expect(svgOf(on)).toContain('fill="#ff0000"');
+	});
+
+	describe("dans le profil Alerte avec plusieurs alertes", () => {
+		const queued = (total: number): RenderContext => ({
+			displayed: { alert: alert({ pattern: "solid" }), startedAt: 0 },
+			position: { index: 1, total },
+			isInAlertProfile: () => true,
+		});
+
+		it("dessine ◀ ▶ ✖✖ sur la dernière rangée", () => {
+			expect(keyImage(handle("k", 0, 2), queued(3), 0)).toBe(renderControl("prev"));
+			expect(keyImage(handle("k", 1, 2), queued(3), 0)).toBe(renderControl("next"));
+			expect(keyImage(handle("k", 4, 2), queued(3), 0)).toBe(renderControl("clearAll"));
+			expect(keyImage(handle("k", 2, 2), queued(3), 0)).toBe(renderFrame(computeKeyFrame(alert({ pattern: "solid" }), { column: 2, row: 2 }, MK2, 0)!, MK2));
+		});
+
+		it("affiche le badge 1/3 dans le coin haut-droit", () => {
+			expect(svgOf(keyImage(handle("k", 4, 0), queued(3), 0))).toContain(">1/3</text>");
+			expect(svgOf(keyImage(handle("k", 3, 0), queued(3), 0))).not.toContain("1/3");
+		});
+
+		it("n'affiche ni navigation ni badge avec une seule alerte", () => {
+			expect(keyImage(handle("k", 0, 2), queued(1), 0)).not.toBe(renderControl("prev"));
+			expect(svgOf(keyImage(handle("k", 4, 0), queued(1), 0))).not.toContain("1/1");
+		});
 	});
 
 	it("idleLookFrom ignore les réglages invalides", () => {

@@ -2,16 +2,36 @@ import type { DisplayedAlert } from "../alerts/alert-manager";
 import { ICONS, type Hex, type IconName } from "../alerts/schema";
 import type { AlertKeyHandle } from "../devices/key-registry";
 import { computeKeyFrame } from "./frames";
-import { renderFrame, renderIdle, type IdleLook } from "./svg";
+import { hasBadge, keyRole } from "./layout";
+import { renderControl, renderFrame, renderIdle, type IdleLook } from "./svg";
+
+/** État global nécessaire pour dessiner une touche. */
+export interface RenderContext {
+	readonly displayed: DisplayedAlert | undefined;
+	/** Position de l'alerte affichée dans la file. */
+	readonly position: { readonly index: number; readonly total: number } | null;
+	/** L'appareil affiche le profil Alerte. */
+	isInAlertProfile(deviceId: string): boolean;
+}
 
 /**
- * Image d'une Alert key : la frame de l'alerte affichée si la touche est concernée,
- * sinon son apparence de repos.
+ * Image d'une Alert key :
+ * - touche de navigation (◀ ▶ ✖✖) dans le profil Alerte quand plusieurs alertes attendent ;
+ * - frame de l'alerte affichée si la touche est concernée, avec le badge « 1/3 » le cas échéant ;
+ * - sinon son apparence de repos.
  */
-export function keyImage(key: AlertKeyHandle, displayed: DisplayedAlert | undefined, now: number): string {
+export function keyImage(key: AlertKeyHandle, context: RenderContext, now: number): string {
+	const { displayed, position } = context;
 	if (displayed && key.position) {
+		const layout = { inAlertProfile: context.isInAlertProfile(key.deviceId), queueSize: position?.total ?? 1 };
+		const role = keyRole(key.position, key.grid, layout);
+		if (role !== "alert") return renderControl(role);
+
 		const frame = computeKeyFrame(displayed.alert, key.position, key.grid, now - displayed.startedAt);
-		if (frame) return renderFrame(frame, key.grid);
+		if (frame) {
+			const badge = position && hasBadge(key.position, key.grid, layout) ? `${position.index}/${position.total}` : undefined;
+			return renderFrame(frame, key.grid, badge);
+		}
 	}
 	return renderIdle(key.idle);
 }

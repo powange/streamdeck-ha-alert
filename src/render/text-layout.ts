@@ -31,10 +31,27 @@ export function estimateTextWidth(text: string, fontSize: number): number {
 }
 
 /**
- * Découpe un texte en lignes de largeur maximale `maxWidth` (retour à la ligne par mots ;
- * un mot trop long est coupé).
+ * Paragraphes d'un texte : les retours à la ligne saisis par l'utilisateur, sans lignes vides.
+ * La séquence `\n` tapée littéralement (champ texte d'une ligne dans HA) compte aussi.
+ */
+export function paragraphs(text: string): string[] {
+	return text
+		.replace(/\\n/g, "\n")
+		.split(/\r?\n/)
+		.map((p) => p.trim())
+		.filter((p) => p !== "");
+}
+
+/**
+ * Découpe un texte en lignes de largeur maximale `maxWidth` : chaque retour à la ligne saisi
+ * commence une nouvelle ligne, puis les paragraphes trop longs sont coupés entre les mots
+ * (un mot plus large que la ligne est coupé lui aussi).
  */
 export function wrapText(text: string, fontSize: number, maxWidth: number): string[] {
+	return paragraphs(text).flatMap((paragraph) => wrapParagraph(paragraph, fontSize, maxWidth));
+}
+
+function wrapParagraph(text: string, fontSize: number, maxWidth: number): string[] {
 	const lines: string[] = [];
 	let line = "";
 	for (const word of text.split(/\s+/).filter((w) => w !== "")) {
@@ -208,7 +225,10 @@ function computeBannerLayout(text: string, grid: Grid): BannerLayout {
 		}
 	}
 
-	const line = text.replace(/\s+/g, " ").trim();
+	// Une seule ligne défilante : les retours à la ligne deviennent des séparateurs.
+	const line = paragraphs(text)
+		.map((p) => p.replace(/\s+/g, " "))
+		.join(" · ");
 	return {
 		kind: "scroll",
 		line,

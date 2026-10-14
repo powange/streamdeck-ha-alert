@@ -159,6 +159,13 @@ describe("texte sur une touche", () => {
 		expect(fitKeyText("  ", false)).toBeNull();
 	});
 
+	it("respecte les retours à la ligne saisis, réels ou tapés \\n", () => {
+		expect(wrapText("Porte\nd'entrée", 30, 500)).toEqual(["Porte", "d'entrée"]);
+		expect(wrapText("Porte\\nd'entrée", 30, 500)).toEqual(["Porte", "d'entrée"]);
+		expect(wrapText("Ligne 1\r\n\n  Ligne 2  ", 30, 500)).toEqual(["Ligne 1", "Ligne 2"]);
+		expect(fitKeyText("Lave\nlinge", false)?.lines).toEqual(["Lave", "linge"]);
+	});
+
 	it("wrapText coupe un mot plus large que la ligne", () => {
 		const lines = wrapText("Anticonstitutionnellement", 40, 120);
 		expect(lines.length).toBeGreaterThan(1);
@@ -176,6 +183,18 @@ describe("bannière (texte géant sur toute la grille)", () => {
 	it("répartit un texte moyen sur plusieurs lignes si la grille le permet", () => {
 		const layout = layoutBanner("Repas prêt", XL);
 		expect(layout.kind).toBe("static");
+	});
+
+	it("place chaque ligne saisie sur sa propre rangée", () => {
+		const layout = layoutBanner("Repas\nprêt", XL);
+		expect(layout.kind).toBe("static");
+		if (layout.kind === "static") expect(layout.lines).toEqual(["Repas", "prêt"]);
+	});
+
+	it("joint les lignes par « · » dans un texte défilant", () => {
+		const layout = layoutBanner("La machine à laver est terminée\npense à étendre le linge tout de suite", MK2);
+		expect(layout.kind).toBe("scroll");
+		if (layout.kind === "scroll") expect(layout.line).toBe("La machine à laver est terminée · pense à étendre le linge tout de suite");
 	});
 
 	it("fait défiler un texte long", () => {

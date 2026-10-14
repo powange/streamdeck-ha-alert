@@ -1,0 +1,32 @@
+# Réagir aux alertes du Stream Deck :
+# - streamdeck_alert_ack : l'alerte a été acquittée par un appui (si ack_required est activé) ;
+#   données : id, device (nom du Stream Deck), device_id.
+# - streamdeck_alert_expired : l'alerte a disparu à la fin de sa durée sans être acquittée ;
+#   données : id.
+# Remplace notify.mobile_app_mon_telephone par ton service de notification.
+
+- id: streamdeck_sonnette_vue
+  alias: Stream Deck – Sonnette vue
+  triggers:
+    - trigger: event
+      event_type: streamdeck_alert_ack
+      event_data:
+        id: sonnette
+  actions:
+    - action: notify.mobile_app_mon_telephone
+      data:
+        title: Sonnette
+        message: "Vu sur le {{ trigger.event.data.device }}."
+
+- id: streamdeck_sonnette_sans_reponse
+  alias: Stream Deck – Sonnette sans réponse
+  triggers:
+    - trigger: event
+      event_type: streamdeck_alert_expired
+      event_data:
+        id: sonnette
+  actions:
+    - action: notify.mobile_app_mon_telephone
+      data:
+        title: Sonnette
+        message: Quelqu'un a sonné et personne n'a répondu.

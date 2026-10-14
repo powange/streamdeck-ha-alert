@@ -1,0 +1,35 @@
+# Sonnette : alerte plein écran rouge clignotante sur tous les Stream Deck, à acquitter.
+# À copier dans automations.yaml (ou dans l'éditeur YAML d'une nouvelle automatisation,
+# sans le tiret initial). Remplace binary_sensor.sonnette par l'entité de ta sonnette.
+
+- id: streamdeck_sonnette
+  alias: Stream Deck – Sonnette
+  description: Alerte plein écran quand on sonne ; un appui sur le Stream Deck l'acquitte.
+  triggers:
+    - trigger: state
+      entity_id: binary_sensor.sonnette
+      to: "on"
+  actions:
+    - action: script.streamdeck_alert
+      data:
+        id: sonnette
+        mode: fullscreen
+        pattern: blink
+        color: [255, 0, 0]
+        text: Sonnette
+        interval_ms: 400
+        duration_s: 120
+        priority: 10
+        ack_required: true
+
+# Efface l'alerte dès que la porte d'entrée s'ouvre (quelqu'un est allé ouvrir).
+- id: streamdeck_sonnette_porte_ouverte
+  alias: Stream Deck – Sonnette, porte ouverte
+  triggers:
+    - trigger: state
+      entity_id: binary_sensor.porte_entree
+      to: "on"
+  actions:
+    - action: script.streamdeck_alert_clear
+      data:
+        id: sonnette

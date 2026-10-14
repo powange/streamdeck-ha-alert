@@ -57,6 +57,37 @@ describe("parseAlert", () => {
 		expect(explicit.ok && explicit.value.text_style).toBe("key");
 	});
 
+	it("traite les champs null ou vides comme absents (script Home Assistant)", () => {
+		const result = parseAlert({
+			id: "sonnette",
+			mode: null,
+			text_style: null,
+			color: [255, 0, 0],
+			color2: null,
+			keys: "",
+			text: "Sonnette",
+			icon: "",
+			interval_ms: null,
+			duration_s: null,
+			priority: null,
+			ack_required: null,
+		});
+		expect(result.ok).toBe(true);
+		if (!result.ok) return;
+		expect(result.value).toMatchObject({
+			mode: "fullscreen",
+			text_style: "banner",
+			color: "#ff0000",
+			color2: "#000000",
+			icon: "none",
+			interval_ms: 500,
+			duration_s: 30,
+			priority: 0,
+			ack_required: false,
+		});
+		expect(result.value.keys).toBeUndefined();
+	});
+
 	it("refuse une alerte sans id", () => {
 		const result = parseAlert({ color: "#ff0000" });
 		expect(result.ok).toBe(false);
@@ -134,5 +165,6 @@ describe("parseClear", () => {
 	it("accepte l'absence de données (tout effacer)", () => {
 		expect(parseClear(undefined)).toEqual({ ok: true, value: {} });
 		expect(parseClear({})).toEqual({ ok: true, value: {} });
+		expect(parseClear({ id: null })).toEqual({ ok: true, value: {} });
 	});
 });

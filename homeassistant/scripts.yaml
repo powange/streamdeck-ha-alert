@@ -1,0 +1,177 @@
+# Scripts Home Assistant pour le plugin Stream Deck « HA Alert ».
+# À copier dans le fichier scripts.yaml de Home Assistant (ou à coller dans l'éditeur YAML
+# d'un nouveau script, sans la première ligne « streamdeck_alert: »), puis recharger les scripts.
+#
+# Les champs laissés vides prennent la valeur par défaut du plugin.
+
+streamdeck_alert:
+  alias: Alerte Stream Deck
+  description: >-
+    Affiche une alerte sur le Stream Deck (plugin HA Alert) : plein écran sur tous les
+    Stream Deck, ou animation de certaines touches « Alert key ».
+  icon: mdi:alarm-light
+  mode: parallel
+  fields:
+    id:
+      name: Identifiant
+      description: >-
+        Nom unique de l'alerte. Une nouvelle alerte avec le même identifiant remplace
+        l'ancienne ; il sert aussi à l'effacer et à reconnaître son acquittement.
+      required: true
+      example: sonnette
+      selector:
+        text:
+    text:
+      name: Texte
+      description: >-
+        Texte affiché (200 caractères au plus). Un retour à la ligne (ou \n) force une
+        nouvelle ligne.
+      example: Sonnette
+      selector:
+        text:
+          multiline: true
+    mode:
+      name: Mode
+      description: >-
+        Plein écran : bascule tous les Stream Deck sur le profil Alerte.
+        Touches : anime seulement les Alert keys posées sur la page affichée.
+      default: fullscreen
+      selector:
+        select:
+          options:
+            - label: Plein écran
+              value: fullscreen
+            - label: Touches choisies
+              value: keys
+    pattern:
+      name: Motif
+      default: blink
+      selector:
+        select:
+          options:
+            - label: Clignotement
+              value: blink
+            - label: Pulsation
+              value: pulse
+            - label: Chenillard
+              value: chase
+            - label: Fixe
+              value: solid
+            - label: Arc-en-ciel
+              value: rainbow
+    color:
+      name: Couleur
+      description: Couleur principale (rouge par défaut).
+      selector:
+        color_rgb:
+    color2:
+      name: Couleur secondaire
+      description: Seconde couleur du clignotement, de la pulsation et du chenillard (noir par défaut).
+      selector:
+        color_rgb:
+    keys:
+      name: Touches
+      description: >-
+        Index des touches concernées, séparés par des virgules (0 = en haut à gauche, puis
+        de gauche à droite et de haut en bas). Vide : toutes les touches.
+      example: "0, 4, 10"
+      selector:
+        text:
+    text_style:
+      name: Style du texte
+      description: >-
+        Texte géant étalé sur tout le Stream Deck, ou répété sur chaque touche.
+        Vide : géant en plein écran, par touche en mode touches.
+      selector:
+        select:
+          options:
+            - label: Texte géant
+              value: banner
+            - label: Sur chaque touche
+              value: key
+    icon:
+      name: Icône
+      description: Icône affichée avec le texte sur chaque touche (style « sur chaque touche »).
+      selector:
+        select:
+          options:
+            - label: Aucune
+              value: none
+            - label: Cloche
+              value: bell
+            - label: Porte
+              value: door
+            - label: Attention
+              value: warning
+            - label: Information
+              value: info
+            - label: Validé
+              value: check
+            - label: Lave-linge
+              value: washer
+    interval_ms:
+      name: Vitesse
+      description: Durée d'une étape de l'animation (500 ms par défaut).
+      selector:
+        number:
+          min: 100
+          max: 5000
+          step: 50
+          unit_of_measurement: ms
+    duration_s:
+      name: Durée
+      description: Durée d'affichage sans acquittement (30 s par défaut). 0 = jusqu'à l'acquittement.
+      selector:
+        number:
+          min: 0
+          max: 3600
+          step: 5
+          unit_of_measurement: s
+    priority:
+      name: Priorité
+      description: Entre plusieurs alertes, la plus prioritaire s'affiche en premier (0 par défaut).
+      selector:
+        number:
+          min: -100
+          max: 100
+          mode: box
+    ack_required:
+      name: Acquittement attendu
+      description: >-
+        Si activé, un appui sur le Stream Deck envoie l'événement streamdeck_alert_ack
+        à Home Assistant.
+      selector:
+        boolean:
+  sequence:
+    - event: streamdeck_alert
+      event_data:
+        id: "{{ id }}"
+        text: "{{ text | default(none) }}"
+        mode: "{{ mode | default(none) }}"
+        pattern: "{{ pattern | default(none) }}"
+        color: "{{ color | default(none) }}"
+        color2: "{{ color2 | default(none) }}"
+        keys: "{{ keys | default(none) }}"
+        text_style: "{{ text_style | default(none) }}"
+        icon: "{{ icon | default(none) }}"
+        interval_ms: "{{ interval_ms | default(none) }}"
+        duration_s: "{{ duration_s | default(none) }}"
+        priority: "{{ priority | default(none) }}"
+        ack_required: "{{ ack_required | default(none) }}"
+
+streamdeck_alert_clear:
+  alias: Effacer une alerte Stream Deck
+  description: Efface une alerte du Stream Deck, ou toutes les alertes si l'identifiant est vide.
+  icon: mdi:alarm-light-off
+  mode: parallel
+  fields:
+    id:
+      name: Identifiant
+      description: "Identifiant de l'alerte à effacer. Vide : toutes les alertes."
+      example: sonnette
+      selector:
+        text:
+  sequence:
+    - event: streamdeck_alert_clear
+      event_data:
+        id: "{{ id | default(none) }}"

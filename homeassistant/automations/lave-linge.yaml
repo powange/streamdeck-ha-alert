@@ -1,0 +1,27 @@
+# Lave-linge terminé : la touche en haut à gauche (index 0) pulse en vert pendant 60 s,
+# sans changer de page. Il faut une « Alert key » à cet emplacement sur la page affichée.
+# Remplace sensor.lave_linge_puissance par le capteur de puissance de ta prise connectée.
+
+- id: streamdeck_lave_linge
+  alias: Stream Deck – Lave-linge terminé
+  description: La consommation est restée sous 3 W pendant 2 minutes après un cycle.
+  triggers:
+    - trigger: numeric_state
+      entity_id: sensor.lave_linge_puissance
+      below: 3
+      for: "00:02:00"
+  conditions:
+    # Évite de déclencher quand la machine était déjà à l'arrêt (redémarrage de HA…).
+    - condition: template
+      value_template: "{{ trigger.from_state.state | float(0) > 3 }}"
+  actions:
+    - action: script.streamdeck_alert
+      data:
+        id: lave_linge
+        mode: keys
+        keys: "0"
+        pattern: pulse
+        color: [0, 200, 0]
+        text: Linge
+        icon: washer
+        duration_s: 60

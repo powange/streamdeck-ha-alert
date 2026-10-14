@@ -50,34 +50,51 @@ const keyList = z.preprocess((value) => {
 	return value;
 }, z.array(keyIndex).optional());
 
+/**
+ * Retire les champs `null` ou vides : un script Home Assistant transmet `null` pour un champ
+ * optionnel non renseigné, qui doit alors prendre sa valeur par défaut.
+ */
+function withoutEmptyFields(data: unknown): unknown {
+	if (typeof data !== "object" || data === null || Array.isArray(data)) return data;
+	return Object.fromEntries(
+		Object.entries(data).filter(([, value]) => value !== null && !(typeof value === "string" && value.trim() === "")),
+	);
+}
+
 /** Schéma de l'événement `streamdeck_alert`. */
-export const alertSchema = z
-	.object({
-		id: z.coerce.string().trim().min(1, "id obligatoire"),
-		mode: z.enum(["fullscreen", "keys"]).default("fullscreen"),
-		pattern: z.enum(["blink", "pulse", "chase", "solid", "rainbow"]).default("blink"),
-		color: color.default("#ff0000"),
-		color2: color.default("#000000"),
-		keys: keyList,
-		key_colors: z.record(z.string().regex(/^\d+$/, "index de touche attendu"), color).default({}),
-		text: z.coerce.string().max(200).default(""),
-		/** Absent : texte géant (`banner`) en mode `fullscreen`, texte par touche (`key`) en mode `keys`. */
-		text_style: z.enum(["key", "banner"]).optional(),
-		icon: z.enum(ICONS).default("none"),
-		interval_ms: z.coerce.number().int().min(100).max(10_000).default(500),
-		duration_s: z.coerce.number().min(0).max(86_400).default(30),
-		priority: z.coerce.number().int().min(-1000).max(1000).default(0),
-		ack_required: bool.default(false),
-	})
-	.transform((alert) => ({ ...alert, text_style: alert.text_style ?? (alert.mode === "fullscreen" ? "banner" : "key") }));
+export const alertSchema = z.preprocess(
+	withoutEmptyFields,
+	z
+		.object({
+			id: z.coerce.string().trim().min(1, "id obligatoire"),
+			mode: z.enum(["fullscreen", "keys"]).default("fullscreen"),
+			pattern: z.enum(["blink", "pulse", "chase", "solid", "rainbow"]).default("blink"),
+			color: color.default("#ff0000"),
+			color2: color.default("#000000"),
+			keys: keyList,
+			key_colors: z.record(z.string().regex(/^\d+$/, "index de touche attendu"), color).default({}),
+			text: z.coerce.string().max(200).default(""),
+			/** Absent : texte géant (`banner`) en mode `fullscreen`, texte par touche (`key`) en mode `keys`. */
+			text_style: z.enum(["key", "banner"]).optional(),
+			icon: z.enum(ICONS).default("none"),
+			interval_ms: z.coerce.number().int().min(100).max(10_000).default(500),
+			duration_s: z.coerce.number().min(0).max(86_400).default(30),
+			priority: z.coerce.number().int().min(-1000).max(1000).default(0),
+			ack_required: bool.default(false),
+		})
+		.transform((alert) => ({ ...alert, text_style: alert.text_style ?? (alert.mode === "fullscreen" ? "banner" : "key") })),
+);
 
 /** Alerte validée, avec toutes les valeurs par défaut appliquées. */
 export type Alert = z.output<typeof alertSchema>;
 
 /** Schéma de l'événement `streamdeck_alert_clear` : sans `id`, tout est effacé. */
-export const clearSchema = z.object({
-	id: z.coerce.string().trim().min(1).optional(),
-});
+export const clearSchema = z.preprocess(
+	withoutEmptyFields,
+	z.object({
+		id: z.coerce.string().trim().min(1).optional(),
+	}),
+);
 
 export type ClearRequest = z.output<typeof clearSchema>;
 

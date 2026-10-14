@@ -4,21 +4,67 @@
 		<title>Statut HA</title>
 		<meta charset="utf-8" />
 		<script src="https://sdpi-components.dev/releases/v4/sdpi-components.js"></script>
+		<style>
+			#test-result { margin: 0; }
+			#test-result.ok { color: #66bb6a; }
+			#test-result.ko { color: #ef5350; }
+		</style>
 	</head>
 
 	<body>
 		<sdpi-heading>Connexion à Home Assistant</sdpi-heading>
 
 		<sdpi-item label="URL">
-			<sdpi-textfield setting="haUrl" global placeholder="ws://homeassistant.local:8123/api/websocket"></sdpi-textfield>
+			<sdpi-textfield id="ha-url" setting="haUrl" global placeholder="ws://homeassistant.local:8123/api/websocket"></sdpi-textfield>
 		</sdpi-item>
 
 		<sdpi-item label="Token">
-			<sdpi-password setting="haToken" global placeholder="Token d'accès longue durée"></sdpi-password>
+			<sdpi-password id="ha-token" setting="haToken" global placeholder="Token d'accès longue durée"></sdpi-password>
 		</sdpi-item>
 
-		<sdpi-item label="Usage">
-			<p>Appui long : déclenche une alerte de test.</p>
+		<sdpi-item>
+			<sdpi-button id="test-button">Tester la connexion</sdpi-button>
 		</sdpi-item>
+
+		<sdpi-item>
+			<p id="test-result"></p>
+		</sdpi-item>
+
+		<details class="help">
+			<summary>Créer le token</summary>
+			<ol>
+				<li>Dans Home Assistant, ouvre ton <b>profil</b> (en bas à gauche) → onglet <b>Sécurité</b>.</li>
+				<li>Section <b>Jetons d'accès longue durée</b> → <b>Créer un jeton</b>, nomme-le « Stream Deck ».</li>
+				<li>Copie le jeton (il n'est affiché qu'une fois) et colle-le ci-dessus.</li>
+			</ol>
+			<p>Le compte doit être <b>administrateur</b> : Home Assistant réserve aux administrateurs l'écoute des événements personnalisés et l'envoi de l'acquittement.</p>
+			<p>L'URL peut aussi s'écrire <code>http://homeassistant.local:8123</code> : elle est convertie automatiquement.</p>
+		</details>
+
+		<sdpi-item label="Usage">
+			<p>La pastille indique l'état de la connexion. Appui long : alerte de test (bientôt).</p>
+		</sdpi-item>
+
+		<script>
+			const result = document.getElementById("test-result");
+
+			document.getElementById("test-button").addEventListener("click", () => {
+				result.className = "";
+				result.textContent = "Test en cours…";
+				SDPIComponents.streamDeckClient.send("sendToPlugin", {
+					event: "testConnection",
+					url: document.getElementById("ha-url").value ?? "",
+					token: document.getElementById("ha-token").value ?? "",
+				});
+			});
+
+			SDPIComponents.streamDeckClient.sendToPropertyInspector.subscribe((message) => {
+				const payload = message && message.payload;
+				if (payload && payload.event === "testResult") {
+					result.className = payload.ok ? "ok" : "ko";
+					result.textContent = (payload.ok ? "✔ " : "✖ ") + payload.message;
+				}
+			});
+		</script>
 	</body>
 </html>

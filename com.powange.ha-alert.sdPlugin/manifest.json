@@ -37,6 +37,14 @@
 			]
 		}
 	],
+	"Profiles": [
+		{
+			"Name": "profiles/HA Alert XL",
+			"DeviceType": 2,
+			"Readonly": false,
+			"DontAutoSwitchWhenInstalled": true
+		}
+	],
 	"Category": "HA Alert",
 	"CategoryIcon": "imgs/plugin/category-icon",
 	"CodePath": "bin/plugin.js",

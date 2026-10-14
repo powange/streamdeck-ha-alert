@@ -12,7 +12,7 @@ Ce profil dépend du modèle de Stream Deck et doit être créé à la main dans
 
 | Appareil | `DeviceType` | Fichier attendu | Disponible |
 |---|---|---|---|
-| Stream Deck XL (8×4) | 2 | `profiles/HA Alert XL.streamDeckProfile` | à créer |
+| Stream Deck XL (8×4) | 2 | `profiles/HA Alert XL.streamDeckProfile` | oui |
 | Stream Deck MK.2 / Original (5×3) | 0 | `profiles/HA Alert.streamDeckProfile` | non |
 | Stream Deck Mini (3×2) | 1 | `profiles/HA Alert Mini.streamDeckProfile` | non |
 | Stream Deck + (4×2) | 7 | `profiles/HA Alert Plus.streamDeckProfile` | non |

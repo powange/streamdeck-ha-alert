@@ -7,8 +7,34 @@
 	</head>
 
 	<body>
+		<sdpi-heading>Apparence hors alerte</sdpi-heading>
+
+		<sdpi-item label="Fond">
+			<sdpi-color setting="idleColor" default="#000000"></sdpi-color>
+		</sdpi-item>
+
+		<sdpi-item label="Texte">
+			<sdpi-textfield setting="idleText" maxlength="60" placeholder="Optionnel"></sdpi-textfield>
+		</sdpi-item>
+
+		<sdpi-item label="Icône">
+			<sdpi-select setting="idleIcon" default="bell">
+				<option value="none">Aucune</option>
+				<option value="bell">Cloche</option>
+				<option value="door">Porte</option>
+				<option value="warning">Attention</option>
+				<option value="info">Information</option>
+				<option value="check">Validé</option>
+				<option value="washer">Lave-linge</option>
+			</sdpi-select>
+		</sdpi-item>
+
 		<sdpi-item label="Usage">
-			<p>Affiche les alertes Home Assistant. Un appui pendant une alerte l'acquitte.</p>
+			<p>
+				Pendant une alerte Home Assistant, la touche est animée. Un appui l'acquitte.<br />
+				En mode <code>keys</code>, seules les touches dont l'index figure dans <code>keys</code> sont animées
+				(index = ligne × colonnes + colonne, à partir de 0 en haut à gauche).
+			</p>
 		</sdpi-item>
 	</body>
 </html>

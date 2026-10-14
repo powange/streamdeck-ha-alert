@@ -13,6 +13,12 @@ const sdPlugin = "com.powange.ha-alert.sdPlugin";
  */
 const config = {
 	input: "src/plugin.ts",
+	// Avertissements internes à zod (annotations et dépendance circulaire), sans effet sur le bundle.
+	onwarn(warning, warn) {
+		const ids = [warning.id, ...(warning.ids ?? [])].filter(Boolean);
+		if (ids.length > 0 && ids.every((id) => id.includes("node_modules"))) return;
+		warn(warning);
+	},
 	output: {
 		file: `${sdPlugin}/bin/plugin.js`,
 		sourcemap: isWatching,

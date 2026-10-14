@@ -135,15 +135,38 @@ export function canvasSize(grid: Grid): { width: number; height: number } {
 
 /** Mise en page d'un texte géant étalé sur toute la grille (style `banner`). */
 export type BannerLayout =
-	| { readonly kind: "static"; readonly lines: readonly string[]; readonly fontSize: number }
-	| { readonly kind: "scroll"; readonly line: string; readonly fontSize: number; readonly textWidth: number };
+	| {
+			readonly kind: "static";
+			readonly lines: readonly string[];
+			readonly fontSize: number;
+			/** Ordonnée du centre de chaque ligne dans le panneau (px). */
+			readonly centers: readonly number[];
+	  }
+	| {
+			readonly kind: "scroll";
+			readonly line: string;
+			readonly fontSize: number;
+			readonly textWidth: number;
+			/** Ordonnée du centre de la ligne dans le panneau (px). */
+			readonly center: number;
+	  };
 
 /** En dessous de cette taille, on préfère faire défiler le texte plutôt que le réduire. */
 const BANNER_MIN_STATIC = KEY_PX * 0.75;
+/** Taille d'une ligne alignée sur une rangée de touches : 80 % de la hauteur d'une touche. */
+const ROW_FONT_SIZE = Math.floor(KEY_PX * 0.8);
+
+/** Ordonnée du centre de la rangée `row` dans le panneau. */
+function rowCenter(row: number): number {
+	return row * (KEY_PX + GAP_PX) + KEY_PX / 2;
+}
 
 /**
- * Texte géant : affiché fixe et centré s'il tient sur `rows` lignes au plus avec une taille
- * suffisante, sinon défilant sur une ligne (environ 7 caractères visibles à la fois).
+ * Texte géant étalé sur toute la grille, par ordre de préférence :
+ * 1. une seule ligne, aussi grande que possible (jusqu'aux 3/4 de la hauteur) ;
+ * 2. plusieurs lignes, chacune centrée sur une rangée de touches pour que les espaces
+ *    entre rangées ne coupent pas les lettres ;
+ * 3. une ligne défilante, alignée sur la rangée du milieu.
  */
 export function layoutBanner(text: string, grid: Grid): BannerLayout {
 	const key = `${grid.columns}x${grid.rows}:${text}`;
@@ -162,16 +185,35 @@ const bannerCache = new Map<string, BannerLayout>();
 
 function computeBannerLayout(text: string, grid: Grid): BannerLayout {
 	const canvas = canvasSize(grid);
-	const area = { width: canvas.width * 0.94, height: canvas.height * 0.94 };
-	const fitted = fitText(text, area, {
-		maxLines: grid.rows,
+	const width = canvas.width * 0.94;
+
+	const single = fitText(text, { width, height: canvas.height * 0.94 }, {
+		maxLines: 1,
 		max: Math.floor(canvas.height * 0.75),
 		min: Math.floor(BANNER_MIN_STATIC),
 	});
-	if (fitted) {
-		return { kind: "static", ...fitted };
+	if (single) {
+		return { kind: "static", ...single, centers: [canvas.height / 2] };
 	}
+
+	if (grid.rows > 1) {
+		const multi = fitText(text, { width, height: Number.POSITIVE_INFINITY }, {
+			maxLines: grid.rows,
+			max: ROW_FONT_SIZE,
+			min: Math.floor(BANNER_MIN_STATIC),
+		});
+		if (multi) {
+			const first = Math.floor((grid.rows - multi.lines.length) / 2);
+			return { kind: "static", ...multi, centers: multi.lines.map((_, i) => rowCenter(first + i)) };
+		}
+	}
+
 	const line = text.replace(/\s+/g, " ").trim();
-	const fontSize = Math.floor(Math.min(canvas.height * 0.75, canvas.width / 7 / 0.6));
-	return { kind: "scroll", line, fontSize, textWidth: estimateTextWidth(line, fontSize) };
+	return {
+		kind: "scroll",
+		line,
+		fontSize: ROW_FONT_SIZE,
+		textWidth: estimateTextWidth(line, ROW_FONT_SIZE),
+		center: rowCenter(Math.floor((grid.rows - 1) / 2)),
+	};
 }

@@ -26,7 +26,7 @@ function handle(id: string, column: number, row: number, setImage = vi.fn(() => 
 
 describe("svg", () => {
 	it("dessine le fond et le texte d'une touche", () => {
-		const frame = computeKeyFrame(alert({ pattern: "solid", text: "Linge" }), { column: 0, row: 0 }, MK2, 0)!;
+		const frame = computeKeyFrame(alert({ pattern: "solid", text: "Linge", text_style: "key" }), { column: 0, row: 0 }, MK2, 0)!;
 		const svg = svgOf(renderFrame(frame, MK2));
 		expect(svg).toContain('fill="#ff0000"');
 		expect(svg).toContain(">Linge</text>");
@@ -35,14 +35,14 @@ describe("svg", () => {
 
 	it("échappe le texte", () => {
 		expect(escapeXml(`<a & "b">`)).toBe("&lt;a &amp; &quot;b&quot;&gt;");
-		const frame = computeKeyFrame(alert({ pattern: "solid", text: "R&D <ok>" }), { column: 0, row: 0 }, MK2, 0)!;
+		const frame = computeKeyFrame(alert({ pattern: "solid", text: "R&D <ok>", text_style: "key" }), { column: 0, row: 0 }, MK2, 0)!;
 		const svg = svgOf(renderFrame(frame, MK2));
 		expect(svg).toContain(">R&amp;D</text>");
 		expect(svg).toContain(">&lt;ok&gt;</text>");
 	});
 
 	it("dessine l'icône demandée", () => {
-		const frame = computeKeyFrame(alert({ pattern: "solid", icon: "bell" }), { column: 0, row: 0 }, MK2, 0)!;
+		const frame = computeKeyFrame(alert({ pattern: "solid", icon: "bell", text_style: "key" }), { column: 0, row: 0 }, MK2, 0)!;
 		expect(svgOf(renderFrame(frame, MK2))).toContain("<g transform=");
 	});
 
@@ -58,7 +58,7 @@ describe("svg", () => {
 	});
 
 	it("met en cache les images identiques", () => {
-		const frame = computeKeyFrame(alert({ pattern: "solid", text: "cache" }), { column: 1, row: 1 }, MK2, 0)!;
+		const frame = computeKeyFrame(alert({ pattern: "solid", text: "cache", text_style: "key" }), { column: 1, row: 1 }, MK2, 0)!;
 		const first = renderFrame(frame, MK2);
 		const size = cacheSize();
 		expect(renderFrame({ ...frame }, MK2)).toBe(first);

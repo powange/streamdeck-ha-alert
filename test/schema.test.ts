@@ -16,7 +16,7 @@ describe("parseAlert", () => {
 				keys: undefined,
 				key_colors: {},
 				text: "",
-				text_style: "key",
+				text_style: "banner",
 				icon: "none",
 				interval_ms: 500,
 				duration_s: 30,
@@ -46,6 +46,15 @@ describe("parseAlert", () => {
 		expect(result.value.keys).toEqual([0, 4, 10]);
 		expect(result.value.key_colors).toEqual({ "0": "#ff0000", "4": "#00ff00" });
 		expect(result.value.ack_required).toBe(true);
+	});
+
+	it("choisit le style de texte selon le mode quand il est absent", () => {
+		const full = parseAlert({ id: "a", mode: "fullscreen" });
+		const keys = parseAlert({ id: "a", mode: "keys" });
+		const explicit = parseAlert({ id: "a", mode: "fullscreen", text_style: "key" });
+		expect(full.ok && full.value.text_style).toBe("banner");
+		expect(keys.ok && keys.value.text_style).toBe("key");
+		expect(explicit.ok && explicit.value.text_style).toBe("key");
 	});
 
 	it("refuse une alerte sans id", () => {

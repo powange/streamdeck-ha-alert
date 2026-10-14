@@ -1,0 +1,60 @@
+{
+	"$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
+	"Name": "HA Alert",
+	"Version": "0.1.0.0",
+	"Author": "powange",
+	"Actions": [
+		{
+			"Name": "Alert key",
+			"UUID": "com.powange.ha-alert.alert-key",
+			"Icon": "imgs/actions/alert-key/icon",
+			"Tooltip": "Touche d'affichage des alertes Home Assistant. Un appui pendant une alerte l'acquitte.",
+			"PropertyInspectorPath": "ui/alert-key.html",
+			"Controllers": [
+				"Keypad"
+			],
+			"States": [
+				{
+					"Image": "imgs/actions/alert-key/key",
+					"ShowTitle": false
+				}
+			]
+		},
+		{
+			"Name": "Statut HA",
+			"UUID": "com.powange.ha-alert.status",
+			"Icon": "imgs/actions/status/icon",
+			"Tooltip": "État de la connexion à Home Assistant et alertes en attente. Appui long : alerte de test.",
+			"PropertyInspectorPath": "ui/status.html",
+			"Controllers": [
+				"Keypad"
+			],
+			"States": [
+				{
+					"Image": "imgs/actions/status/key",
+					"ShowTitle": false
+				}
+			]
+		}
+	],
+	"Category": "HA Alert",
+	"CategoryIcon": "imgs/plugin/category-icon",
+	"CodePath": "bin/plugin.js",
+	"Description": "Alertes visuelles sur le Stream Deck déclenchées par Home Assistant : plein écran ou touches choisies, couleurs et motifs animés.",
+	"Icon": "imgs/plugin/marketplace",
+	"SDKVersion": 3,
+	"Software": {
+		"MinimumVersion": "7.1"
+	},
+	"OS": [
+		{
+			"Platform": "windows",
+			"MinimumVersion": "10"
+		}
+	],
+	"Nodejs": {
+		"Version": "24",
+		"Debug": "enabled"
+	},
+	"UUID": "com.powange.ha-alert"
+}

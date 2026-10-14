@@ -1,0 +1,42 @@
+name: Release
+
+# Pousser un tag comme v0.2.0 construit le plugin et publie une release GitHub contenant le fichier
+# .streamDeckPlugin installable (double-clic pour installer).
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm test
+
+      - run: npm run build
+
+      # Le débogueur Node.js ne doit pas être activé dans les versions distribuées.
+      - name: Disable debug mode
+        run: |
+          jq 'del(.Nodejs.Debug)' com.powange.ha-alert.sdPlugin/manifest.json > manifest.tmp
+          mv manifest.tmp com.powange.ha-alert.sdPlugin/manifest.json
+
+      - name: Pack plugin
+        run: npx streamdeck pack com.powange.ha-alert.sdPlugin --version "${GITHUB_REF_NAME#v}" --output dist --force --no-file-list
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/com.powange.ha-alert.streamDeckPlugin --title "$GITHUB_REF_NAME" --generate-notes

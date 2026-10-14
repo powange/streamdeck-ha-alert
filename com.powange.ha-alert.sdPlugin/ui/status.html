@@ -1,0 +1,24 @@
+<!doctype html>
+<html>
+	<head lang="fr">
+		<title>Statut HA</title>
+		<meta charset="utf-8" />
+		<script src="https://sdpi-components.dev/releases/v4/sdpi-components.js"></script>
+	</head>
+
+	<body>
+		<sdpi-heading>Connexion à Home Assistant</sdpi-heading>
+
+		<sdpi-item label="URL">
+			<sdpi-textfield setting="haUrl" global placeholder="ws://homeassistant.local:8123/api/websocket"></sdpi-textfield>
+		</sdpi-item>
+
+		<sdpi-item label="Token">
+			<sdpi-password setting="haToken" global placeholder="Token d'accès longue durée"></sdpi-password>
+		</sdpi-item>
+
+		<sdpi-item label="Usage">
+			<p>Appui long : déclenche une alerte de test.</p>
+		</sdpi-item>
+	</body>
+</html>
